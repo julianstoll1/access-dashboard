@@ -29,7 +29,9 @@ export default function LoginPage() {
             return;
         }
 
+        // 🔥 DAS IST DER ENTSCHEIDENDE FIX
         router.push("/dashboard");
+        router.refresh();
     }
 
     return (
@@ -76,10 +78,7 @@ export default function LoginPage() {
 
             <p className="mt-6 text-sm text-white/50">
                 No account yet?{" "}
-                <Link
-                    href="/signup"
-                    className="text-white hover:underline"
-                >
+                <Link href="/signup" className="text-white hover:underline">
                     Create one
                 </Link>
             </p>

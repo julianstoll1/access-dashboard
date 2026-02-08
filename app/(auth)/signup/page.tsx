@@ -17,7 +17,7 @@ export default function SignupPage() {
         setError(null);
         setLoading(true);
 
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
             email,
             password,
         });
@@ -29,7 +29,9 @@ export default function SignupPage() {
             return;
         }
 
+        // 🔥 WICHTIG: Session-Refresh
         router.push("/dashboard");
+        router.refresh();
     }
 
     return (
@@ -76,10 +78,7 @@ export default function SignupPage() {
 
             <p className="mt-6 text-sm text-white/50">
                 Already have an account?{" "}
-                <Link
-                    href="/login"
-                    className="text-white hover:underline"
-                >
+                <Link href="/login" className="text-white hover:underline">
                     Sign in
                 </Link>
             </p>
