@@ -17,19 +17,19 @@ function encrypt(text: string) {
     return `${iv.toString("hex")}:${encrypted}`;
 }
 
+function generateRawKey() {
+    return `sk_live_${crypto.randomBytes(24).toString("hex")}`;
+}
+
 export async function generateApiKey(formData: FormData) {
     const projectId = formData.get("projectId") as string;
     if (!projectId) throw new Error("Missing projectId");
 
     const supabase = await createSupabaseServerClient();
 
-    const rawKey = `sk_live_${crypto.randomBytes(24).toString("hex")}`;
+    const rawKey = generateRawKey();
 
-    const hash = crypto
-        .createHash("sha256")
-        .update(rawKey)
-        .digest("hex");
-
+    const hash = crypto.createHash("sha256").update(rawKey).digest("hex");
     const encrypted = encrypt(rawKey);
 
     const { error } = await supabase.from("api_keys").insert({
@@ -38,10 +38,31 @@ export async function generateApiKey(formData: FormData) {
         key_encrypted: encrypted,
     });
 
-    if (error) {
-        throw new Error("Failed to generate API key");
-    }
+    if (error) throw new Error("Failed to generate API key");
 
-    // 🔥 DAS IST DER WICHTIGE TEIL
+    revalidatePath(`/dashboard/projects/${projectId}`);
+}
+
+export async function rotateApiKey(formData: FormData) {
+    const projectId = formData.get("projectId") as string;
+    if (!projectId) throw new Error("Missing projectId");
+
+    const supabase = await createSupabaseServerClient();
+
+    const rawKey = generateRawKey();
+    const hash = crypto.createHash("sha256").update(rawKey).digest("hex");
+    const encrypted = encrypt(rawKey);
+
+    const { error } = await supabase
+        .from("api_keys")
+        .update({
+            key_hash: hash,
+            key_encrypted: encrypted,
+            created_at: new Date().toISOString(),
+        })
+        .eq("project_id", projectId);
+
+    if (error) throw new Error("Failed to rotate API key");
+
     revalidatePath(`/dashboard/projects/${projectId}`);
 }

@@ -3,6 +3,7 @@ import { getProject } from "@/lib/projects";
 import { getApiKeyForProject } from "@/lib/apiKeys";
 
 import { GenerateApiKeyButton } from "./GenerateApiKeyButton";
+import { RotateApiKeyButton } from "./RotateApiKeyButton";
 import { CopyApiKeyButton } from "./CopyApiKeyButton";
 import { BackButton } from "./BackButton";
 
@@ -25,10 +26,8 @@ export default async function ProjectPage({
     return (
         <div className="min-h-screen bg-[#0b0b0c] text-white">
             <main className="mx-auto max-w-3xl px-8 py-16">
-                {/* Back */}
                 <BackButton />
 
-                {/* Header */}
                 <div className="mt-6">
                     <h1 className="text-2xl font-semibold tracking-tight">
                         {project.name}
@@ -38,7 +37,6 @@ export default async function ProjectPage({
                     </p>
                 </div>
 
-                {/* API Key */}
                 <div className="mt-10 rounded-xl border border-white/10 bg-[#0f0f11] p-6">
                     <h2 className="text-sm font-medium">API Key</h2>
 
@@ -55,12 +53,16 @@ export default async function ProjectPage({
                     ) : (
                         <>
                             <p className="mt-2 text-sm text-white/50">
-                                API key for this project
+                                Active API key
                             </p>
 
                             <div className="mt-4 flex items-center justify-between rounded-md bg-black/40 px-4 py-3 text-sm">
                                 <code>{maskedKey}</code>
                                 <CopyApiKeyButton value={apiKey.key} />
+                            </div>
+
+                            <div className="mt-6">
+                                <RotateApiKeyButton projectId={project.id} />
                             </div>
                         </>
                     )}
