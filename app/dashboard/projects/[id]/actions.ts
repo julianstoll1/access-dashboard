@@ -28,7 +28,6 @@ export async function generateApiKey(formData: FormData) {
     const supabase = await createSupabaseServerClient();
 
     const rawKey = generateRawKey();
-
     const hash = crypto.createHash("sha256").update(rawKey).digest("hex");
     const encrypted = encrypt(rawKey);
 
@@ -36,6 +35,8 @@ export async function generateApiKey(formData: FormData) {
         project_id: projectId,
         key_hash: hash,
         key_encrypted: encrypted,
+        created_at: new Date().toISOString(),
+        last_rotated_at: new Date().toISOString(),
     });
 
     if (error) throw new Error("Failed to generate API key");
@@ -58,7 +59,7 @@ export async function rotateApiKey(formData: FormData) {
         .update({
             key_hash: hash,
             key_encrypted: encrypted,
-            created_at: new Date().toISOString(),
+            last_rotated_at: new Date().toISOString(),
         })
         .eq("project_id", projectId);
 

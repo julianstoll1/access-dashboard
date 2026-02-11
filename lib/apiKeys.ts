@@ -18,16 +18,19 @@ function decrypt(value: string) {
 export async function getApiKeyForProject(projectId: string) {
     const supabase = await createSupabaseServerClient();
 
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from("api_keys")
-        .select("key_encrypted, created_at")
+        .select("key_encrypted, created_at, last_rotated_at")
         .eq("project_id", projectId)
         .single();
 
-    if (!data) return null;
+    if (error || !data) return null;
+
+    const decrypted = decrypt(data.key_encrypted);
 
     return {
-        key: decrypt(data.key_encrypted),
+        key: decrypted,
         created_at: data.created_at,
+        last_rotated_at: data.last_rotated_at,
     };
 }
