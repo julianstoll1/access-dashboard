@@ -4,16 +4,30 @@ import { revalidatePath } from "next/cache";
 import {
     createPermission,
     deletePermission,
-    togglePermission
+    togglePermission,
+    updatePermission
 } from "@/lib/permissions";
 
-export async function createPermissionAction(projectId: string, name: string) {
-    await createPermission(projectId, name);
+export async function createPermissionAction(
+    projectId: string,
+    name: string,
+    description?: string,
+    riskLevel: "low" | "medium" | "high" = "low",
+    slug: string = ""
+) {
+    const result = await createPermission(projectId, {
+        name,
+        slug,
+        description: description ?? null,
+        risk_level: riskLevel,
+    });
+    if (!result.ok) throw new Error("Failed to create permission");
     revalidatePath(`/dashboard/projects/${projectId}`);
 }
 
 export async function deletePermissionAction(projectId: string, id: string) {
-    await deletePermission(id);
+    const result = await deletePermission(id, projectId);
+    if (!result.ok) throw new Error("Failed to delete permission");
     revalidatePath(`/dashboard/projects/${projectId}`);
 }
 
@@ -22,6 +36,27 @@ export async function togglePermissionAction(
     id: string,
     enabled: boolean
 ) {
-    await togglePermission(id, enabled);
+    const result = await togglePermission(id, enabled, projectId);
+    if (!result.ok) throw new Error("Failed to toggle permission");
+    revalidatePath(`/dashboard/projects/${projectId}`);
+}
+
+export async function updatePermissionAction(
+    projectId: string,
+    id: string,
+    name: string,
+    description?: string,
+    riskLevel: "low" | "medium" | "high" = "low",
+    enabled: boolean = true,
+    slug: string = ""
+) {
+    const result = await updatePermission(id, {
+        name,
+        slug,
+        description: description ?? null,
+        risk_level: riskLevel,
+        enabled,
+    });
+    if (!result.ok) throw new Error("Failed to update permission");
     revalidatePath(`/dashboard/projects/${projectId}`);
 }

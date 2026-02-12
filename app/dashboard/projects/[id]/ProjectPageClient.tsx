@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { ApiKeyDisplay } from "./ApiKeyDisplay";
 import { GenerateApiKeyButton } from "./GenerateApiKeyButton";
 import { BackButton } from "./BackButton";
@@ -23,8 +23,8 @@ export default function ProjectPageClient({
     const usagePercent = Math.round((usageMonth / usageLimit) * 100);
 
     return (
-        <div className="min-h-screen bg-[#0e1117] text-white">
-            <main className="mx-auto max-w-[1400px] px-12 py-20">
+        <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#0e1117] text-white">
+            <main className="mx-auto w-full max-w-full overflow-x-hidden px-12 py-20">
 
                 <BackButton />
 
@@ -38,19 +38,19 @@ export default function ProjectPageClient({
                     </p>
                 </div>
 
-                <div className="mt-16 grid grid-cols-[240px_1fr] gap-20">
+                <div className="mt-16 grid w-full max-w-full grid-cols-[240px_1fr] gap-20 overflow-x-hidden">
 
                     {/* SIDEBAR */}
                     <aside className="space-y-3">
                         <SidebarItem id="overview" activeTab={activeTab} setActiveTab={setActiveTab} label="Overview" />
                         <SidebarItem id="api" activeTab={activeTab} setActiveTab={setActiveTab} label="API Keys" />
                         <SidebarItem id="roles" activeTab={activeTab} setActiveTab={setActiveTab} label="Roles" />
-                        <SidebarItem id="features" activeTab={activeTab} setActiveTab={setActiveTab} label="Features" />
+                        <SidebarItem id="features" activeTab={activeTab} setActiveTab={setActiveTab} label="Permissions" />
                         <SidebarItem id="integration" activeTab={activeTab} setActiveTab={setActiveTab} label="Integration" />
                     </aside>
 
                     {/* CONTENT */}
-                    <div className="space-y-28">
+                    <div className="min-w-0 max-w-full space-y-28">
 
                         {activeTab === "overview" && (
                             <div className="grid grid-cols-3 gap-12">
@@ -132,142 +132,1044 @@ export default function ProjectPageClient({
 /* ================= COMPONENTS ================= */
 
 import {
-    createPermissionAction,
+    createPermissionAction as createPermissionActionRaw,
+    updatePermissionAction as updatePermissionActionRaw,
     deletePermissionAction,
-    togglePermissionAction
-} from "./permission-actions";
+    togglePermissionAction,
+} from "./permissions-actions";
 
-function PermissionsManager({ permissions, projectId }: any) {
+type Permission = {
+    id: string;
+    name: string;
+    slug: string;
+    description: string | null;
+    enabled: boolean;
+    risk_level: "low" | "medium" | "high";
+    usage_count: number;
+    last_used_at: string | null;
+    is_system: boolean;
+    created_at: string;
+    updated_at: string;
+    created_at_display: string;
+    last_used_at_display: string;
+};
 
-    const [query, setQuery] = useState("");
+type SortKey = "name" | "usage_count" | "created_at" | "last_used_at";
+type SortDirection = "asc" | "desc";
+type ValidationErrors = {
+    name?: string;
+    slug?: string;
+};
 
-    const filtered = permissions.filter((p: any) =>
-        p.name.toLowerCase().includes(query.toLowerCase())
+const SLUG_REGEX = /^[a-z0-9.]+$/;
+
+function slugify(value: string) {
+    return value
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9.]+/g, ".")
+        .replace(/\.{2,}/g, ".")
+        .replace(/(^\.)|(\.$)/g, "");
+}
+
+function formatDateDisplay(value: string | null) {
+    if (!value) return "Never";
+    return value.slice(0, 10);
+}
+
+function formatDateTimeDisplay(value: string | null) {
+    if (!value) return "Never";
+    return value.replace("T", " ").slice(0, 16);
+}
+
+function normalizePermission(raw: any): Permission {
+    return {
+        ...raw,
+        description: raw.description ?? null,
+        created_at_display: formatDateDisplay(raw.created_at),
+        last_used_at_display: formatDateDisplay(raw.last_used_at),
+    };
+}
+
+function validatePermissionForm({
+    name,
+    slug,
+    existingPermissions,
+    currentPermissionId,
+}: {
+    name: string;
+    slug: string;
+    existingPermissions: Permission[];
+    currentPermissionId?: string;
+}): ValidationErrors {
+    const errors: ValidationErrors = {};
+    const normalizedName = name.trim();
+    const normalizedSlug = slug.trim();
+
+    if (!normalizedName) {
+        errors.name = "Name required";
+    }
+    if (!normalizedSlug) {
+        errors.slug = "Slug required";
+        return errors;
+    }
+    if (!SLUG_REGEX.test(normalizedSlug)) {
+        errors.slug = "Only lowercase letters, numbers and dots allowed";
+        return errors;
+    }
+    const duplicate = existingPermissions.some(
+        (permission) =>
+            permission.slug === normalizedSlug && permission.id !== currentPermissionId
     );
+    if (duplicate) {
+        errors.slug = "Slug already exists";
+    }
+    return errors;
+}
+
+function PermissionsManager({ permissions: initialPermissions, projectId }: any) {
+    const [permissions, setPermissions] = useState<Permission[]>(
+        () => (initialPermissions ?? []).map(normalizePermission)
+    );
+    const [query, setQuery] = useState("");
+    const [statusFilter, setStatusFilter] = useState("all");
+    const [riskFilter, setRiskFilter] = useState("all");
+    const [sortKey, setSortKey] = useState<SortKey>("created_at");
+    const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+    const [isCreateOpen, setIsCreateOpen] = useState(false);
+    const [editingPermission, setEditingPermission] = useState<Permission | null>(null);
+    const [deletingPermission, setDeletingPermission] = useState<Permission | null>(null);
+    const [viewingPermissionId, setViewingPermissionId] = useState<string | null>(null);
+
+    const filteredPermissions = useMemo(() => {
+        const normalizedQuery = query.trim().toLowerCase();
+        let list = permissions;
+
+        if (normalizedQuery) {
+            list = list.filter((permission) =>
+                permission.name.toLowerCase().includes(normalizedQuery) ||
+                permission.slug.toLowerCase().includes(normalizedQuery)
+            );
+        }
+
+        if (statusFilter !== "all") {
+            list = list.filter((permission) =>
+                statusFilter === "enabled" ? permission.enabled : !permission.enabled
+            );
+        }
+
+        if (riskFilter !== "all") {
+            list = list.filter((permission) => permission.risk_level === riskFilter);
+        }
+
+        return list;
+    }, [permissions, query, statusFilter, riskFilter]);
+
+    const sortedPermissions = useMemo(() => {
+        const sorted = [...filteredPermissions];
+        sorted.sort((a, b) => {
+            let comparison = 0;
+            if (sortKey === "name") {
+                comparison = a.name.localeCompare(b.name);
+            }
+            if (sortKey === "usage_count") {
+                comparison = a.usage_count - b.usage_count;
+            }
+            if (sortKey === "created_at") {
+                comparison =
+                    new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+            }
+            if (sortKey === "last_used_at") {
+                comparison =
+                    (a.last_used_at ? new Date(a.last_used_at).getTime() : 0) -
+                    (b.last_used_at ? new Date(b.last_used_at).getTime() : 0);
+            }
+            return sortDirection === "asc" ? comparison : -comparison;
+        });
+        return sorted;
+    }, [filteredPermissions, sortKey, sortDirection]);
+
+    const viewingPermission = useMemo(
+        () => permissions.find((permission) => permission.id === viewingPermissionId) ?? null,
+        [permissions, viewingPermissionId]
+    );
+
+    const handleSortChange = useCallback(
+        (value: SortKey) => {
+            if (value === sortKey) {
+                setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+            } else {
+                setSortKey(value);
+                setSortDirection("desc");
+            }
+        },
+        [sortKey]
+    );
+
+    const handleToggle = useCallback(async (permission: Permission) => {
+        const nextEnabled = !permission.enabled;
+        setPermissions((prev) =>
+            prev.map((item) =>
+                item.id === permission.id
+                    ? normalizePermission({ ...item, enabled: nextEnabled })
+                    : item
+            )
+        );
+        const result = await togglePermissionAction(projectId, permission.id, nextEnabled);
+        if (!result.ok) {
+            setPermissions((prev) =>
+                prev.map((item) =>
+                    item.id === permission.id
+                        ? normalizePermission({ ...item, enabled: permission.enabled })
+                        : item
+                )
+            );
+        }
+    }, [projectId]);
+
+    const handleCreate = useCallback(
+        async (data: {
+            name: string;
+            slug: string;
+            description?: string;
+            risk_level: Permission["risk_level"];
+        }) => {
+            const result = await createPermissionActionRaw(projectId, data);
+            if (result.ok && result.data) {
+                setPermissions((prev) => [normalizePermission(result.data), ...prev]);
+                setIsCreateOpen(false);
+            }
+            return result;
+        },
+        [projectId]
+    );
+
+    const handleUpdate = useCallback(
+        async (id: string, data: {
+            name: string;
+            slug: string;
+            description?: string;
+            risk_level: Permission["risk_level"];
+            enabled: boolean;
+        }) => {
+            setPermissions((prev) =>
+                prev.map((item) =>
+                    item.id === id ? normalizePermission({ ...item, ...data }) : item
+                )
+            );
+            const result = await updatePermissionActionRaw(id, data);
+            if (result.ok && result.data) {
+                setPermissions((prev) =>
+                    prev.map((item) =>
+                        item.id === id ? normalizePermission(result.data) : item
+                    )
+                );
+                setEditingPermission(null);
+            }
+            return result;
+        },
+        [projectId]
+    );
+
+    const handleDelete = useCallback(async () => {
+        if (!deletingPermission || deletingPermission.is_system) return;
+        const result = await deletePermissionAction(projectId, deletingPermission.id);
+        if (result.ok) {
+            setPermissions((prev) =>
+                prev.filter((item) => item.id !== deletingPermission.id)
+            );
+            if (viewingPermissionId === deletingPermission.id) {
+                setViewingPermissionId(null);
+            }
+            setDeletingPermission(null);
+        }
+        return result;
+    }, [projectId, deletingPermission, viewingPermissionId]);
 
     return (
         <>
-            {/* TOPBAR */}
-            <div className="flex items-center justify-between">
+            <FilterBar
+                query={query}
+                onQueryChange={setQuery}
+                statusFilter={statusFilter}
+                onStatusFilterChange={setStatusFilter}
+                riskFilter={riskFilter}
+                onRiskFilterChange={setRiskFilter}
+                sortKey={sortKey}
+                onSortChange={handleSortChange}
+                onCreate={() => setIsCreateOpen(true)}
+            />
 
-                <input
-                    value={query}
-                    onChange={e => setQuery(e.target.value)}
-                    placeholder="Search permission..."
-                    className="w-80 rounded-lg border border-white/10 bg-[#0c0f14] px-4 py-2 text-sm"
+            <PermissionsTable
+                permissions={sortedPermissions}
+                onView={(permission) => setViewingPermissionId(permission.id)}
+                onToggle={handleToggle}
+                onEdit={(permission) => setEditingPermission(permission)}
+                onDelete={(permission) => setDeletingPermission(permission)}
+            />
+
+            {isCreateOpen && (
+                <CreatePermissionModal
+                    permissions={permissions}
+                    onClose={() => setIsCreateOpen(false)}
+                    onCreate={handleCreate}
                 />
+            )}
 
-                <form
-                    action={async (formData) => {
-                        const name = formData.get("name") as string;
-                        if (!name) return;
-                        await createPermissionAction(projectId, name);
+            {editingPermission && (
+                <EditPermissionModal
+                    permissions={permissions}
+                    permission={editingPermission}
+                    onClose={() => setEditingPermission(null)}
+                    onSave={handleUpdate}
+                />
+            )}
+
+            {viewingPermission && (
+                <PermissionDetailModal
+                    permission={viewingPermission}
+                    onClose={() => setViewingPermissionId(null)}
+                    onEdit={(permission) => {
+                        setViewingPermissionId(null);
+                        setEditingPermission(permission);
                     }}
-                >
-                    <input name="name" hidden />
-                    <button
-                        type="submit"
-                        onClick={(e)=>{
-                            e.preventDefault()
-                            const name = prompt("Permission name")
-                            if(!name) return
-                            const input = (e.currentTarget.form!.elements.namedItem("name") as HTMLInputElement)
-                            input.value = name
-                            e.currentTarget.form!.requestSubmit()
-                        }}
-                        className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-black"
-                    >
-                        + Create
-                    </button>
-                </form>
+                    onDelete={(permission) => {
+                        setViewingPermissionId(null);
+                        setDeletingPermission(permission);
+                    }}
+                />
+            )}
 
-            </div>
-
-
-            {/* TABLE */}
-            <div className="mt-10 overflow-hidden rounded-xl border border-white/10">
-
-                <div className="grid grid-cols-[1.8fr_1fr_160px] bg-white/[0.02] px-6 py-3 text-xs uppercase text-white/40">
-                    <span>Name</span>
-                    <span>Status</span>
-                    <span className="text-right">Actions</span>
-                </div>
-
-                {filtered.map((p:any)=>(
-                    <PermissionRow
-                        key={p.id}
-                        item={p}
-                        projectId={projectId}
-                    />
-                ))}
-
-                {filtered.length===0 && (
-                    <div className="p-10 text-center text-sm text-white/40">
-                        No permissions found
-                    </div>
-                )}
-
-            </div>
+            {deletingPermission && (
+                <ConfirmDeleteModal
+                    permission={deletingPermission}
+                    onClose={() => setDeletingPermission(null)}
+                    onConfirm={handleDelete}
+                />
+            )}
         </>
     );
 }
 
-function PermissionRow({ item, onToggle }: any) {
+function FilterBar({
+    query,
+    onQueryChange,
+    statusFilter,
+    onStatusFilterChange,
+    riskFilter,
+    onRiskFilterChange,
+    sortKey,
+    onSortChange,
+    onCreate,
+}: any) {
+    return (
+        <div className="mt-2 w-full min-w-0 max-w-full border-b border-white/10 pb-4">
+            <div className="flex min-w-0 max-w-full flex-col gap-3 lg:flex-row lg:items-end lg:justify-between lg:gap-4">
+                <div className="grid w-full min-w-0 max-w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(280px,1fr)_160px_160px_160px]">
+                    <label className="flex flex-col gap-2">
+                        <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/45">
+                            Search
+                        </span>
+                        <input
+                            value={query}
+                            onChange={(e) => onQueryChange(e.target.value)}
+                            placeholder="Search Permissions"
+                            className="h-11 rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm text-white placeholder:text-white/35 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        />
+                    </label>
+
+                    <label className="flex flex-col gap-2">
+                        <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/45">
+                            Status
+                        </span>
+                        <select
+                            value={statusFilter}
+                            onChange={(e) => onStatusFilterChange(e.target.value)}
+                            className="h-11 rounded-xl border border-white/10 bg-[#0a0f16] px-3 text-sm text-white/85 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        >
+                            <option value="all">All status</option>
+                            <option value="enabled">Enabled</option>
+                            <option value="disabled">Disabled</option>
+                        </select>
+                    </label>
+
+                    <label className="flex flex-col gap-2">
+                        <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/45">
+                            Risk
+                        </span>
+                        <select
+                            value={riskFilter}
+                            onChange={(e) => onRiskFilterChange(e.target.value)}
+                            className="h-11 rounded-xl border border-white/10 bg-[#0a0f16] px-3 text-sm text-white/85 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        >
+                            <option value="all">All risk</option>
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                    </label>
+
+                    <label className="flex flex-col gap-2">
+                        <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/45">
+                            Sort
+                        </span>
+                        <select
+                            value={sortKey}
+                            onChange={(e) => onSortChange(e.target.value)}
+                            className="h-11 rounded-xl border border-white/10 bg-[#0a0f16] px-3 text-sm text-white/85 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        >
+                            <option value="name">Name</option>
+                            <option value="usage_count">Usage</option>
+                            <option value="created_at">Created</option>
+                            <option value="last_used_at">Last used</option>
+                        </select>
+                    </label>
+                </div>
+
+                <button
+                    type="button"
+                    onClick={onCreate}
+                    className="h-10 w-full shrink-0 whitespace-nowrap rounded-lg bg-white px-3.5 text-sm font-semibold text-black transition hover:bg-white/90 focus:outline-none focus:ring-2 focus:ring-white/20 lg:h-11 lg:w-auto lg:min-w-[168px]"
+                >
+                    + New Permission
+                </button>
+            </div>
+        </div>
+    );
+}
+
+function PermissionsTable({
+    permissions,
+    onView,
+    onToggle,
+    onEdit,
+    onDelete,
+}: {
+    permissions: Permission[];
+    onView: (permission: Permission) => void;
+    onToggle: (permission: Permission) => void;
+    onEdit: (permission: Permission) => void;
+    onDelete: (permission: Permission) => void;
+}) {
+    return (
+        <div className="mt-6 w-full min-w-0 max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-[#0f141d] shadow-[0_20px_45px_-30px_rgba(0,0,0,0.9)] lg:overflow-x-hidden">
+            <div className="min-w-[920px] max-w-full lg:min-w-0 lg:w-full">
+                <div className="grid grid-cols-[minmax(340px,2.4fr)_200px_130px_130px_150px_170px] border-b border-white/10 bg-[#111827] px-6 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white/45 lg:grid-cols-[minmax(0,2.4fr)_minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.9fr)_minmax(0,1fr)]">
+                    <span className="whitespace-nowrap">Name</span>
+                    <span className="whitespace-nowrap">Status</span>
+                    <span className="whitespace-nowrap">Risk</span>
+                    <span className="whitespace-nowrap">Usage</span>
+                    <span className="whitespace-nowrap">Last used</span>
+                    <span className="whitespace-nowrap text-right">Actions</span>
+                </div>
+
+                {permissions.map((permission) => (
+                    <PermissionRow
+                        key={permission.id}
+                        permission={permission}
+                        onView={onView}
+                        onToggle={onToggle}
+                        onEdit={onEdit}
+                        onDelete={onDelete}
+                    />
+                ))}
+
+                {permissions.length === 0 && (
+                    <div className="px-8 py-14 text-center text-sm text-white/45">
+                        No permissions found
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+const PermissionRow = memo(function PermissionRow({
+    permission,
+    onView,
+    onToggle,
+    onEdit,
+    onDelete,
+}: {
+    permission: Permission;
+    onView: (permission: Permission) => void;
+    onToggle: (permission: Permission) => void;
+    onEdit: (permission: Permission) => void;
+    onDelete: (permission: Permission) => void;
+}) {
+    const [copied, setCopied] = useState(false);
 
     const riskColor =
-        item.risk==="low"
-            ? "text-emerald-400"
-            : item.risk==="medium"
-                ? "text-amber-400"
-                : "text-red-400"
+        permission.risk_level === "low"
+            ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
+            : permission.risk_level === "medium"
+                ? "border-amber-400/20 bg-amber-400/10 text-amber-200"
+                : "border-red-400/20 bg-red-400/10 text-red-300";
+
+    const statusColor = permission.enabled
+        ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-300"
+        : "border-white/10 bg-white/5 text-white/60";
+
+    const formatCount = (value: number) =>
+        value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+    const handleCopy = async () => {
+        await navigator.clipboard?.writeText(permission.slug);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+    };
 
     return (
-        <div className="group grid grid-cols-[1.8fr_1fr_1fr_1fr_160px] items-center border-t border-white/5 px-6 py-4 text-sm hover:bg-white/[0.02] transition">
-
-            <div>
-                <p className="font-mono text-white/90">{item.name}</p>
-                <p className="text-xs text-white/30">Permission flag</p>
+        <div
+            role="button"
+            tabIndex={0}
+            onClick={() => onView(permission)}
+            onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onView(permission);
+                }
+            }}
+            className="group grid min-w-[920px] grid-cols-[minmax(340px,2.4fr)_200px_130px_130px_150px_170px] items-center border-t border-white/10 px-6 py-5 text-sm transition hover:bg-white/[0.03] cursor-pointer lg:min-w-0 lg:w-full lg:grid-cols-[minmax(0,2.4fr)_minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.9fr)_minmax(0,1fr)]"
+        >
+            <div className="min-w-0 max-w-full overflow-hidden">
+                <p title={permission.name} className="truncate font-semibold text-white">
+                    {permission.name}
+                </p>
+                <p title={permission.slug} className="mt-1 truncate font-mono text-xs text-white/55">
+                    {permission.slug}
+                </p>
+                <p
+                    title={permission.description || "No description"}
+                    className="mt-1 truncate text-xs text-white/40"
+                >
+                    {permission.description || "No description"}
+                </p>
             </div>
 
-            <span className="text-white/70">{item.users}</span>
-            <span className="text-white/50">{item.lastUsed}</span>
-            <span className={`text-xs font-medium ${riskColor}`}>{item.risk}</span>
-
-            <div className="flex items-center justify-end gap-3 opacity-0 transition group-hover:opacity-100">
-
-                {/* Toggle */}
+            <div className="min-w-0 flex items-center gap-3">
+                <span className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium ${statusColor}`}>
+                    {permission.enabled ? "Enabled" : "Disabled"}
+                </span>
                 <button
-                    onClick={onToggle}
-                    className={`h-6 w-11 rounded-full transition ${
-                        item.enabled ? "bg-emerald-500" : "bg-white/20"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onToggle(permission);
+                    }}
+                    title={permission.enabled ? "Disable permission" : "Enable permission"}
+                    aria-label={permission.enabled ? "Disable permission" : "Enable permission"}
+                    className={`relative h-6 w-11 rounded-full border transition ${
+                        permission.enabled ? "border-emerald-400/50 bg-emerald-500" : "border-white/20 bg-white/15"
                     }`}
                 >
                     <div
-                        className={`h-5 w-5 rounded-full bg-white transition ${
-                            item.enabled ? "translate-x-5" : "translate-x-0"
+                        className={`absolute left-[2px] top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-white transition ${
+                            permission.enabled ? "translate-x-5" : "translate-x-0"
                         }`}
                     />
                 </button>
+            </div>
 
-                {/* Edit */}
+            <span className={`inline-flex w-fit whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${riskColor}`}>
+                {permission.risk_level}
+            </span>
+
+            <span className="whitespace-nowrap font-medium text-white/80">{formatCount(permission.usage_count)}</span>
+
+            <span className="whitespace-nowrap text-white/60">{permission.last_used_at_display}</span>
+
+            <div className="flex items-center justify-end gap-2 whitespace-nowrap opacity-70 transition group-hover:opacity-100">
                 <button
-                    onClick={()=>alert("Edit modal would open")}
-                    className="text-xs text-white/60 hover:text-white"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        handleCopy();
+                    }}
+                    title={copied ? "Copied" : "Copy slug"}
+                    aria-label={copied ? "Copied" : "Copy slug"}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.02] text-white/65 transition hover:border-white/25 hover:text-white"
                 >
-                    Edit
+                    {copied ? (
+                        <svg viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor">
+                            <path d="M16.704 5.29a1 1 0 0 1 .006 1.414l-7.2 7.263a1 1 0 0 1-1.42.006L3.29 9.25a1 1 0 0 1 1.42-1.408l4.092 4.138 6.487-6.543a1 1 0 0 1 1.415-.147Z" />
+                        </svg>
+                    ) : (
+                        <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
+                            <rect x="7" y="7" width="9" height="9" rx="2" />
+                            <path d="M4 13V5a2 2 0 0 1 2-2h8" />
+                        </svg>
+                    )}
                 </button>
-
-                {/* Delete */}
                 <button
-                    onClick={()=>alert("Delete confirm modal")}
-                    className="text-xs text-red-400 hover:text-red-300"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onEdit(permission);
+                    }}
+                    title="Edit permission"
+                    aria-label="Edit permission"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.02] text-white/65 transition hover:border-white/25 hover:text-white"
                 >
-                    Delete
+                    <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
+                        <path d="M3 14.8V17h2.2L15.6 6.6a1.55 1.55 0 0 0 0-2.2l-.02-.02a1.55 1.55 0 0 0-2.2 0L3 14.8Z" />
+                        <path d="M11.8 5.2l3 3" />
+                    </svg>
                 </button>
-
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (!permission.is_system) {
+                            onDelete(permission);
+                        }
+                    }}
+                    disabled={permission.is_system}
+                    title={permission.is_system ? "System permissions cannot be deleted" : "Delete permission"}
+                    aria-label="Delete permission"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-400/20 bg-red-500/10 text-red-300 transition hover:border-red-300/40 hover:text-red-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.02] disabled:text-white/30"
+                >
+                    <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
+                        <path d="M4 6h12" />
+                        <path d="M8 6V4h4v2" />
+                        <path d="M6.7 6.7 7.4 16h5.2l.7-9.3" />
+                    </svg>
+                </button>
             </div>
         </div>
-    )
+    );
+});
+
+function CreatePermissionModal({
+    permissions,
+    onClose,
+    onCreate,
+}: {
+    permissions: Permission[];
+    onClose: () => void;
+    onCreate: (data: {
+        name: string;
+        slug: string;
+        description?: string;
+        risk_level: Permission["risk_level"];
+    }) => Promise<any>;
+}) {
+    const [name, setName] = useState("");
+    const [slug, setSlug] = useState("");
+    const [slugTouched, setSlugTouched] = useState(false);
+    const [description, setDescription] = useState("");
+    const [riskLevel, setRiskLevel] = useState<Permission["risk_level"]>("low");
+    const [submitted, setSubmitted] = useState(false);
+
+    const handleNameChange = (value: string) => {
+        setName(value);
+        if (!slugTouched) {
+            setSlug(slugify(value));
+        }
+    };
+
+    const errors = useMemo(
+        () =>
+            validatePermissionForm({
+                name,
+                slug,
+                existingPermissions: permissions,
+            }),
+        [name, slug, permissions]
+    );
+    const canSubmit = !errors.name && !errors.slug;
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setSubmitted(true);
+        if (!canSubmit) return;
+        await onCreate({
+            name: name.trim(),
+            slug: slug.trim(),
+            description: description.trim(),
+            risk_level: riskLevel,
+        });
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
+                <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-5">
+                    <div>
+                        <h3 className="text-xl font-semibold text-white">New permission</h3>
+                        <p className="mt-1 text-sm text-white/45">Define name, slug, and risk level.</p>
+                    </div>
+                    <button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:border-white/25 hover:text-white">
+                        Close
+                    </button>
+                </div>
+                <form onSubmit={handleSubmit} className="mt-6 space-y-6">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <div>
+                            <label className="text-xs uppercase tracking-[0.14em] text-white/45">Name</label>
+                            <input
+                                value={name}
+                                onChange={(e) => handleNameChange(e.target.value)}
+                                className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm text-white focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                            />
+                            {(submitted || name.length > 0) && errors.name && (
+                                <p className="mt-2 text-xs text-red-300">{errors.name}</p>
+                            )}
+                        </div>
+                        <div>
+                            <label className="text-xs uppercase tracking-[0.14em] text-white/45">Slug</label>
+                            <input
+                                value={slug}
+                                onChange={(e) => {
+                                    setSlugTouched(true);
+                                    setSlug(e.target.value);
+                                }}
+                                className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm font-mono text-white focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                            />
+                            <p className="mt-2 text-xs text-white/35">Auto-suggested from name until edited.</p>
+                            {(submitted || slug.length > 0) && errors.slug && (
+                                <p className="mt-2 text-xs text-red-300">{errors.slug}</p>
+                            )}
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-xs uppercase tracking-[0.14em] text-white/45">Description</label>
+                        <textarea
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                            rows={3}
+                            className="mt-2 w-full rounded-xl border border-white/10 bg-[#0a0f16] px-4 py-3 text-sm text-white focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-xs uppercase tracking-[0.14em] text-white/45">Risk level</label>
+                        <select
+                            value={riskLevel}
+                            onChange={(e) => setRiskLevel(e.target.value as Permission["risk_level"])}
+                            className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm text-white focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        >
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
+                    <div className="flex justify-end gap-3 border-t border-white/10 pt-5">
+                        <button type="button" onClick={onClose} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/70 hover:border-white/20 hover:text-white">
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={!canSubmit}
+                            className="rounded-xl bg-white px-5 py-2 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            Create
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+}
+
+function EditPermissionModal({
+    permissions,
+    permission,
+    onClose,
+    onSave,
+}: {
+    permissions: Permission[];
+    permission: Permission;
+    onClose: () => void;
+    onSave: (id: string, data: {
+        name: string;
+        slug: string;
+        description?: string;
+        risk_level: Permission["risk_level"];
+        enabled: boolean;
+    }) => Promise<any>;
+}) {
+    const [name, setName] = useState(permission.name);
+    const [slug, setSlug] = useState(permission.slug);
+    const [slugTouched, setSlugTouched] = useState(
+        permission.slug !== slugify(permission.name)
+    );
+    const [description, setDescription] = useState(permission.description ?? "");
+    const [riskLevel, setRiskLevel] = useState<Permission["risk_level"]>(permission.risk_level);
+    const [enabled, setEnabled] = useState(permission.enabled);
+    const [submitted, setSubmitted] = useState(false);
+
+    const handleNameChange = (value: string) => {
+        setName(value);
+        if (!slugTouched) {
+            setSlug(slugify(value));
+        }
+    };
+
+    const errors = useMemo(
+        () =>
+            validatePermissionForm({
+                name,
+                slug,
+                existingPermissions: permissions,
+                currentPermissionId: permission.id,
+            }),
+        [name, slug, permissions, permission.id]
+    );
+    const canSubmit = !errors.name && !errors.slug;
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setSubmitted(true);
+        if (!canSubmit) return;
+        await onSave(permission.id, {
+            name: name.trim(),
+            slug: slug.trim(),
+            description: description.trim(),
+            risk_level: riskLevel,
+            enabled,
+        });
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
+                <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-5">
+                    <div>
+                        <h3 className="text-xl font-semibold text-white">Edit permission</h3>
+                        <p className="mt-1 text-sm text-white/45">Update metadata and deployment status.</p>
+                    </div>
+                    <button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:border-white/25 hover:text-white">
+                        Close
+                    </button>
+                </div>
+                <form onSubmit={handleSubmit} className="mt-6 space-y-6">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <div>
+                            <label className="text-xs uppercase tracking-[0.14em] text-white/45">Name</label>
+                            <input
+                                value={name}
+                                onChange={(e) => handleNameChange(e.target.value)}
+                                className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm text-white focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                            />
+                            {(submitted || name.length > 0) && errors.name && (
+                                <p className="mt-2 text-xs text-red-300">{errors.name}</p>
+                            )}
+                        </div>
+                        <div>
+                            <label className="text-xs uppercase tracking-[0.14em] text-white/45">Slug</label>
+                            <input
+                                value={slug}
+                                onChange={(e) => {
+                                    setSlugTouched(true);
+                                    setSlug(e.target.value);
+                                }}
+                                className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm font-mono text-white focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                            />
+                            {(submitted || slug.length > 0) && errors.slug && (
+                                <p className="mt-2 text-xs text-red-300">{errors.slug}</p>
+                            )}
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-xs uppercase tracking-[0.14em] text-white/45">Description</label>
+                        <textarea
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                            rows={3}
+                            className="mt-2 w-full rounded-xl border border-white/10 bg-[#0a0f16] px-4 py-3 text-sm text-white focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        />
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="rounded-xl border border-white/10 bg-[#0a0f16] px-4 py-3">
+                            <p className="text-xs uppercase tracking-[0.14em] text-white/45">Enabled</p>
+                            <div className="mt-3 flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm text-white/90">Live in production</p>
+                                    <p className="text-xs text-white/40">Controls access checks immediately.</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setEnabled((prev) => !prev)}
+                                    className={`relative h-6 w-11 rounded-full border transition ${
+                                        enabled ? "border-emerald-400/50 bg-emerald-500" : "border-white/20 bg-white/15"
+                                    }`}
+                                >
+                                    <div
+                                        className={`absolute left-[2px] top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-white transition ${
+                                            enabled ? "translate-x-5" : "translate-x-0"
+                                        }`}
+                                    />
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-xs uppercase tracking-[0.14em] text-white/45">Risk level</label>
+                            <select
+                                value={riskLevel}
+                                onChange={(e) => setRiskLevel(e.target.value as Permission["risk_level"])}
+                                className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm text-white focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                            >
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-3 border-t border-white/10 pt-5">
+                        <button type="button" onClick={onClose} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/70 hover:border-white/20 hover:text-white">
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={!canSubmit}
+                            className="rounded-xl bg-white px-5 py-2 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            Save
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+}
+
+function PermissionDetailModal({
+    permission,
+    onClose,
+    onEdit,
+    onDelete,
+}: {
+    permission: Permission;
+    onClose: () => void;
+    onEdit: (permission: Permission) => void;
+    onDelete: (permission: Permission) => void;
+}) {
+    const statusColor = permission.enabled
+        ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-300"
+        : "border-white/10 bg-white/5 text-white/60";
+    const riskColor =
+        permission.risk_level === "low"
+            ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
+            : permission.risk_level === "medium"
+                ? "border-amber-400/20 bg-amber-400/10 text-amber-200"
+                : "border-red-400/20 bg-red-400/10 text-red-300";
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
+                <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-5">
+                    <div>
+                        <h3 className="text-xl font-semibold text-white">Permission details</h3>
+                        <p className="mt-1 text-sm text-white/45">Full permission metadata and usage details.</p>
+                    </div>
+                    <button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:border-white/25 hover:text-white">
+                        Close
+                    </button>
+                </div>
+
+                <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Name</p>
+                        <p className="mt-2 text-base font-semibold text-white">{permission.name}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Slug</p>
+                        <p className="mt-2 truncate font-mono text-sm text-white/85">{permission.slug}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4 sm:col-span-2">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Description</p>
+                        <p className="mt-2 text-sm text-white/80">{permission.description || "No description"}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Status</p>
+                        <span className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusColor}`}>
+                            {permission.enabled ? "Enabled" : "Disabled"}
+                        </span>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Risk</p>
+                        <span className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${riskColor}`}>
+                            {permission.risk_level}
+                        </span>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Usage count</p>
+                        <p className="mt-2 text-sm text-white/85">{permission.usage_count.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Last used</p>
+                        <p className="mt-2 text-sm text-white/85">{permission.last_used_at_display}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Created at</p>
+                        <p className="mt-2 text-sm text-white/85">{formatDateTimeDisplay(permission.created_at)}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Updated at</p>
+                        <p className="mt-2 text-sm text-white/85">{formatDateTimeDisplay(permission.updated_at)}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4 sm:col-span-2">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Type</p>
+                        <p className="mt-2 text-sm text-white/85">{permission.is_system ? "System permission" : "Custom permission"}</p>
+                    </div>
+                </div>
+
+                <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
+                    <button type="button" onClick={onClose} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/70 hover:border-white/20 hover:text-white">
+                        Close
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => onEdit(permission)}
+                        className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-white hover:border-white/30"
+                    >
+                        Edit Permission
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => onDelete(permission)}
+                        disabled={permission.is_system}
+                        className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ConfirmDeleteModal({
+    permission,
+    onClose,
+    onConfirm,
+}: {
+    permission: Permission;
+    onClose: () => void;
+    onConfirm: () => void;
+}) {
+    const isBlocked = permission.is_system;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0f141d] p-7">
+                <h3 className="text-xl font-semibold text-white">Delete permission</h3>
+                <p className="mt-2 text-sm text-white/50">
+                    {isBlocked
+                        ? "System permissions cannot be deleted."
+                        : `Are you sure you want to delete ${permission.name}?`}
+                </p>
+                <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
+                    <button onClick={onClose} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/70 hover:border-white/20 hover:text-white">
+                        Cancel
+                    </button>
+                    <button
+                        onClick={onConfirm}
+                        disabled={isBlocked}
+                        className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 }
 
 function SidebarItem({
@@ -294,11 +1196,11 @@ function SidebarItem({
 
 function Section({ title, children }: any) {
     return (
-        <section>
+        <section className="w-full min-w-0 max-w-full">
             <h2 className="text-2xl font-semibold tracking-tight">
                 {title}
             </h2>
-            <div className="mt-10 rounded-2xl border border-white/5 bg-[#151922] p-12">
+            <div className="mt-10 w-full min-w-0 max-w-full overflow-hidden rounded-2xl border border-white/5 bg-[#151922] p-12">
                 {children}
             </div>
         </section>
