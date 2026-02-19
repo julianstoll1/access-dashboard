@@ -910,7 +910,7 @@ function RoleEditorModal({
                             {mode === "create" ? "New role" : "Edit role"}
                         </h3>
                         <p className="mt-1 text-sm text-white/45">
-                            Configure metadata and assign permissions from the Permissions tab.
+                            Metadaten festlegen und Permissions aus dem Permissions-Tab zuweisen.
                         </p>
                     </div>
                     <button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:border-white/25 hover:text-white">
@@ -987,7 +987,7 @@ function RoleEditorModal({
                     <div>
                         <div className="mb-2 flex items-center justify-between">
                             <label className="text-xs uppercase tracking-[0.14em] text-white/45">
-                                Role permissions
+                                Roles-Permissions
                             </label>
                             <span className="text-xs text-white/45">
                                 {selectedPermissions.length} selected
@@ -996,7 +996,7 @@ function RoleEditorModal({
                         <input
                             value={permissionSearch}
                             onChange={(e) => setPermissionSearch(e.target.value)}
-                            placeholder="Filter permissions by name or slug"
+                            placeholder="Permissions nach Name oder Slug filtern"
                             className="h-10 w-full rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm text-white placeholder:text-white/35 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
                         />
                         <div className="mt-3 max-h-64 space-y-2 overflow-y-auto rounded-xl border border-white/10 bg-[#0a0f16] p-3">
@@ -1074,7 +1074,7 @@ function RoleDetailModal({
                     <div>
                         <h3 className="text-xl font-semibold text-white">Role details</h3>
                         <p className="mt-1 text-sm text-white/45">
-                            Assigned permissions and metadata for this role.
+                            Assigned permissions und Metadaten dieser Role.
                         </p>
                     </div>
                     <button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:border-white/25 hover:text-white">
@@ -1134,7 +1134,7 @@ function RoleDetailModal({
                         onClick={() => onEdit(role)}
                         className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-white hover:border-white/30"
                     >
-                        Edit Role
+                        Edit role
                     </button>
                     <button
                         type="button"
@@ -1448,7 +1448,7 @@ function FilterBar({
                         <input
                             value={query}
                             onChange={(e) => onQueryChange(e.target.value)}
-                            placeholder="Search Permissions"
+                            placeholder="Permissions suchen"
                             className="h-11 rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm text-white placeholder:text-white/35 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
                         />
                     </label>
@@ -1462,7 +1462,7 @@ function FilterBar({
                             onChange={(e) => onStatusFilterChange(e.target.value)}
                             className="h-11 rounded-xl border border-white/10 bg-[#0a0f16] px-3 text-sm text-white/85 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
                         >
-                            <option value="all">All status</option>
+                            <option value="all">All statuses</option>
                             <option value="enabled">Enabled</option>
                             <option value="disabled">Disabled</option>
                         </select>
@@ -1477,7 +1477,7 @@ function FilterBar({
                             onChange={(e) => onRiskFilterChange(e.target.value)}
                             className="h-11 rounded-xl border border-white/10 bg-[#0a0f16] px-3 text-sm text-white/85 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
                         >
-                            <option value="all">All risk</option>
+                            <option value="all">All risks</option>
                             <option value="low">Low</option>
                             <option value="medium">Medium</option>
                             <option value="high">High</option>
@@ -1768,7 +1768,7 @@ function CreatePermissionModal({
                 <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-5">
                     <div>
                         <h3 className="text-xl font-semibold text-white">New permission</h3>
-                        <p className="mt-1 text-sm text-white/45">Define name, slug, and risk level.</p>
+                        <p className="mt-1 text-sm text-white/45">Name, Slug und Riskstufe festlegen.</p>
                     </div>
                     <button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:border-white/25 hover:text-white">
                         Close
@@ -1813,7 +1813,7 @@ function CreatePermissionModal({
                         />
                     </div>
                     <div>
-                        <label className="text-xs uppercase tracking-[0.14em] text-white/45">Risk level</label>
+                        <label className="text-xs uppercase tracking-[0.14em] text-white/45">Riskstufe</label>
                         <select
                             value={riskLevel}
                             onChange={(e) => setRiskLevel(e.target.value as Permission["risk_level"])}
@@ -1907,7 +1907,7 @@ function EditPermissionModal({
                 <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-5">
                     <div>
                         <h3 className="text-xl font-semibold text-white">Edit permission</h3>
-                        <p className="mt-1 text-sm text-white/45">Update metadata and deployment status.</p>
+                        <p className="mt-1 text-sm text-white/45">Metadaten und Status aktualisieren.</p>
                     </div>
                     <button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:border-white/25 hover:text-white">
                         Close
@@ -1974,7 +1974,7 @@ function EditPermissionModal({
                             </div>
                         </div>
                         <div>
-                            <label className="text-xs uppercase tracking-[0.14em] text-white/45">Risk level</label>
+                            <label className="text-xs uppercase tracking-[0.14em] text-white/45">Riskstufe</label>
                             <select
                                 value={riskLevel}
                                 onChange={(e) => setRiskLevel(e.target.value as Permission["risk_level"])}
@@ -2094,7 +2094,7 @@ function PermissionDetailModal({
                         onClick={() => onEdit(permission)}
                         className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-white hover:border-white/30"
                     >
-                        Edit Permission
+                        Edit permission
                     </button>
                     <button
                         type="button"

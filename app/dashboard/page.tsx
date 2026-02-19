@@ -134,7 +134,7 @@ function EmptyState() {
                 href="/dashboard/new"
                 className="mt-8 inline-block rounded-xl bg-white px-6 py-3 text-sm font-medium text-black hover:bg-white/90"
             >
-                Create Project
+                Create project
             </a>
         </div>
     );

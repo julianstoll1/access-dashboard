@@ -29,7 +29,7 @@ export default function LoginPage() {
             return;
         }
 
-        // 🔥 DAS IST DER ENTSCHEIDENDE FIX
+        // Ensure session state updates after login
         router.push("/dashboard");
         router.refresh();
     }

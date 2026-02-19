@@ -17,7 +17,7 @@ export default function SignupPage() {
         setError(null);
         setLoading(true);
 
-        const { data, error } = await supabase.auth.signUp({
+        const { error } = await supabase.auth.signUp({
             email,
             password,
         });
@@ -29,7 +29,7 @@ export default function SignupPage() {
             return;
         }
 
-        // 🔥 WICHTIG: Session-Refresh
+        // Ensure session state updates after signup
         router.push("/dashboard");
         router.refresh();
     }

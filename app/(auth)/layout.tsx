@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 export default function AuthLayout({
                                        children,
                                    }: {
@@ -21,7 +19,7 @@ export default function AuthLayout({
                     <p className="mt-8 text-sm text-white/40 max-w-md">
                         Build access control once.
                         Use it everywhere.
-                        No roles. No dashboards from hell.
+                        Clear, maintainable, and without chaos.
                     </p>
                 </div>
 
