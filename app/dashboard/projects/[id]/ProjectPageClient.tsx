@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiKeyDisplay } from "./ApiKeyDisplay";
 import { GenerateApiKeyButton } from "./GenerateApiKeyButton";
@@ -61,6 +61,9 @@ export default function ProjectPageClient({
                                               roles: initialRoles,
                                           }: Props) {
     const router = useRouter();
+    const [rolesHasUnsavedChanges, setRolesHasUnsavedChanges] = useState(false);
+    const [permissionsHasUnsavedChanges, setPermissionsHasUnsavedChanges] = useState(false);
+    const [pendingTabSwitch, setPendingTabSwitch] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState("overview");
     const [permissionsState, setPermissionsState] = useState<Permission[]>(() =>
         (permissions ?? []).map(normalizePermission)
@@ -69,17 +72,38 @@ export default function ProjectPageClient({
         (initialRoles ?? []).map(normalizeRole)
     );
 
+    const hasUnsavedChanges = rolesHasUnsavedChanges || permissionsHasUnsavedChanges;
+
+    useEffect(() => {
+        if (!hasUnsavedChanges) return;
+        const handler = (event: BeforeUnloadEvent) => {
+            event.preventDefault();
+            event.returnValue = "";
+        };
+        window.addEventListener("beforeunload", handler);
+        return () => window.removeEventListener("beforeunload", handler);
+    }, [hasUnsavedChanges]);
+
+    const performTabSelect = useCallback((tabId: string) => {
+        setActiveTab(tabId);
+        if (tabId === "roles" || tabId === "features") {
+            router.refresh();
+        }
+    }, [router]);
+
     const usageMonth = 24193;
     const usageLimit = 100000;
     const usagePercent = Math.round((usageMonth / usageLimit) * 100);
     const handleTabSelect = useCallback(
         (tabId: string) => {
-            setActiveTab(tabId);
-            if (tabId === "roles" || tabId === "features") {
-                router.refresh();
+            if (tabId === activeTab) return;
+            if (hasUnsavedChanges) {
+                setPendingTabSwitch(tabId);
+                return;
             }
+            performTabSelect(tabId);
         },
-        [router]
+        [activeTab, hasUnsavedChanges, performTabSelect]
     );
 
     return (
@@ -152,6 +176,7 @@ export default function ProjectPageClient({
                                     setRoles={setRoles}
                                     permissions={permissionsState}
                                     projectId={project.id}
+                                    onHasUnsavedChangesChange={setRolesHasUnsavedChanges}
                                 />
                             </Section>
                         )}
@@ -163,6 +188,7 @@ export default function ProjectPageClient({
                                     permissions={permissionsState}
                                     setPermissions={setPermissionsState}
                                     projectId={project.id}
+                                    onHasUnsavedChangesChange={setPermissionsHasUnsavedChanges}
                                 />
 
                             </Section>
@@ -189,6 +215,18 @@ export default function ProjectPageClient({
                     </div>
                 </div>
             </main>
+            {pendingTabSwitch && (
+                <DiscardChangesModal
+                    title="Discard unsaved changes?"
+                    message="You have unsaved changes in an open form. If you continue, those changes will be lost."
+                    onCancel={() => setPendingTabSwitch(null)}
+                    onConfirm={() => {
+                        const tabId = pendingTabSwitch;
+                        setPendingTabSwitch(null);
+                        performTabSelect(tabId);
+                    }}
+                />
+            )}
         </div>
     );
 }
@@ -385,11 +423,13 @@ function RolesManager({
     setRoles,
     permissions,
     projectId,
+    onHasUnsavedChangesChange,
 }: {
     roles: Role[];
     setRoles: React.Dispatch<React.SetStateAction<Role[]>>;
     permissions: Permission[];
     projectId: string;
+    onHasUnsavedChangesChange: (value: boolean) => void;
 }) {
     const toast = useToast();
     const availablePermissions = useMemo(() => permissions ?? [], [permissions]);
@@ -402,7 +442,15 @@ function RolesManager({
     const [deletingRole, setDeletingRole] = useState<Role | null>(null);
     const [isRoleSaving, setIsRoleSaving] = useState(false);
     const [isRoleDeleting, setIsRoleDeleting] = useState(false);
+    const [createFormDirty, setCreateFormDirty] = useState(false);
+    const [editFormDirty, setEditFormDirty] = useState(false);
     const [viewingRoleId, setViewingRoleId] = useState<string | null>(null);
+    const hasUnsavedChanges = createFormDirty || editFormDirty;
+
+    useEffect(() => {
+        onHasUnsavedChangesChange(hasUnsavedChanges);
+        return () => onHasUnsavedChangesChange(false);
+    }, [hasUnsavedChanges, onHasUnsavedChangesChange]);
 
     const permissionById = useMemo(() => {
         return new Map(availablePermissions.map((permission) => [permission.id, permission]));
@@ -579,6 +627,7 @@ function RolesManager({
                     }}
                     onSubmit={handleCreate}
                     isSaving={isRoleSaving}
+                    onDirtyChange={setCreateFormDirty}
                 />
             )}
 
@@ -593,6 +642,7 @@ function RolesManager({
                     }}
                     onSubmit={(data) => handleUpdate(editingRole.id, data)}
                     isSaving={isRoleSaving}
+                    onDirtyChange={setEditFormDirty}
                 />
             )}
 
@@ -862,6 +912,7 @@ function RoleEditorModal({
     onClose,
     onSubmit,
     isSaving,
+    onDirtyChange,
 }: {
     mode: "create" | "edit";
     role?: Role;
@@ -876,6 +927,7 @@ function RoleEditorModal({
         is_system: boolean;
     }) => Promise<unknown>;
     isSaving: boolean;
+    onDirtyChange: (value: boolean) => void;
 }) {
     const [name, setName] = useState(role?.name ?? "");
     const [slug, setSlug] = useState(role?.slug ?? "");
@@ -889,6 +941,7 @@ function RoleEditorModal({
     );
     const [permissionSearch, setPermissionSearch] = useState("");
     const [submitted, setSubmitted] = useState(false);
+    const [showDiscardPrompt, setShowDiscardPrompt] = useState(false);
 
     const errors = useMemo(
         () =>
@@ -927,6 +980,28 @@ function RoleEditorModal({
         () => selectedPermissions.filter((id) => validPermissionIdSet.has(id)),
         [selectedPermissions, validPermissionIdSet]
     );
+    const initialSelectedPermissions = useMemo(
+        () => (role?.permission_ids ?? []).filter((id) => validPermissionIdSet.has(id)).sort(),
+        [role?.permission_ids, validPermissionIdSet]
+    );
+    const currentSelectedPermissions = useMemo(
+        () => [...selectedPermissionsValid].sort(),
+        [selectedPermissionsValid]
+    );
+    const isDirty = useMemo(
+        () =>
+            name !== (role?.name ?? "") ||
+            slug !== (role?.slug ?? "") ||
+            description !== (role?.description ?? "") ||
+            isSystem !== (role?.is_system ?? false) ||
+            currentSelectedPermissions.join("|") !== initialSelectedPermissions.join("|"),
+        [name, slug, description, isSystem, role, currentSelectedPermissions, initialSelectedPermissions]
+    );
+
+    useEffect(() => {
+        onDirtyChange(isDirty);
+        return () => onDirtyChange(false);
+    }, [isDirty, onDirtyChange]);
 
     const togglePermission = (permissionId: string) => {
         setSelectedPermissions((prev) =>
@@ -949,9 +1024,19 @@ function RoleEditorModal({
         });
     };
 
+    const requestClose = () => {
+        if (isSaving) return;
+        if (isDirty) {
+            setShowDiscardPrompt(true);
+            return;
+        }
+        onClose();
+    };
+
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-            <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
+        <>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+                <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
                 <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-5">
                     <div>
                         <h3 className="text-xl font-semibold text-white">
@@ -961,7 +1046,7 @@ function RoleEditorModal({
                             Configure metadata and assign permissions from the Permissions tab.
                         </p>
                     </div>
-                    <button onClick={onClose} disabled={isSaving} className="btn btn-secondary text-xs px-3 py-1.5">
+                    <button onClick={requestClose} disabled={isSaving} className="btn btn-secondary text-xs px-3 py-1.5">
                         Close
                     </button>
                 </div>
@@ -1086,7 +1171,7 @@ function RoleEditorModal({
                     </div>
 
                     <div className="flex justify-end gap-3 border-t border-white/10 pt-5">
-                        <button type="button" onClick={onClose} disabled={isSaving} className="btn btn-secondary">
+                        <button type="button" onClick={requestClose} disabled={isSaving} className="btn btn-secondary">
                             Cancel
                         </button>
                         <button
@@ -1098,8 +1183,20 @@ function RoleEditorModal({
                         </button>
                     </div>
                 </form>
+                </div>
             </div>
-        </div>
+            {showDiscardPrompt && (
+                <DiscardChangesModal
+                    title="Discard unsaved changes?"
+                    message="You have unsaved changes in this role form. If you close now, those changes will be lost."
+                    onCancel={() => setShowDiscardPrompt(false)}
+                    onConfirm={() => {
+                        setShowDiscardPrompt(false);
+                        onClose();
+                    }}
+                />
+            )}
+        </>
     );
 }
 
@@ -1252,10 +1349,12 @@ function PermissionsManager({
     permissions,
     setPermissions,
     projectId,
+    onHasUnsavedChangesChange,
 }: {
     permissions: Permission[];
     setPermissions: React.Dispatch<React.SetStateAction<Permission[]>>;
     projectId: string;
+    onHasUnsavedChangesChange: (value: boolean) => void;
 }) {
     const toast = useToast();
     const [query, setQuery] = useState("");
@@ -1269,7 +1368,15 @@ function PermissionsManager({
     const [savingPermissionMode, setSavingPermissionMode] = useState<"create" | "edit" | null>(null);
     const [deletingPermissionId, setDeletingPermissionId] = useState<string | null>(null);
     const [togglingPermissionId, setTogglingPermissionId] = useState<string | null>(null);
+    const [createFormDirty, setCreateFormDirty] = useState(false);
+    const [editFormDirty, setEditFormDirty] = useState(false);
     const [viewingPermissionId, setViewingPermissionId] = useState<string | null>(null);
+    const hasUnsavedChanges = createFormDirty || editFormDirty;
+
+    useEffect(() => {
+        onHasUnsavedChangesChange(hasUnsavedChanges);
+        return () => onHasUnsavedChangesChange(false);
+    }, [hasUnsavedChanges, onHasUnsavedChangesChange]);
 
     const filteredPermissions = useMemo(() => {
         const normalizedQuery = query.trim().toLowerCase();
@@ -1479,6 +1586,7 @@ function PermissionsManager({
                     }}
                     onCreate={handleCreate}
                     isSaving={savingPermissionMode === "create"}
+                    onDirtyChange={setCreateFormDirty}
                 />
             )}
 
@@ -1491,6 +1599,7 @@ function PermissionsManager({
                     }}
                     onSave={handleUpdate}
                     isSaving={savingPermissionMode === "edit"}
+                    onDirtyChange={setEditFormDirty}
                 />
             )}
 
@@ -1829,6 +1938,7 @@ function CreatePermissionModal({
     onClose,
     onCreate,
     isSaving,
+    onDirtyChange,
 }: {
     permissions: Permission[];
     onClose: () => void;
@@ -1839,6 +1949,7 @@ function CreatePermissionModal({
         risk_level: Permission["risk_level"];
     }) => Promise<unknown>;
     isSaving: boolean;
+    onDirtyChange: (value: boolean) => void;
 }) {
     const [name, setName] = useState("");
     const [slug, setSlug] = useState("");
@@ -1846,6 +1957,7 @@ function CreatePermissionModal({
     const [description, setDescription] = useState("");
     const [riskLevel, setRiskLevel] = useState<Permission["risk_level"]>("low");
     const [submitted, setSubmitted] = useState(false);
+    const [showDiscardPrompt, setShowDiscardPrompt] = useState(false);
 
     const handleNameChange = (value: string) => {
         setName(value);
@@ -1864,6 +1976,19 @@ function CreatePermissionModal({
         [name, slug, permissions]
     );
     const canSubmit = !errors.name && !errors.slug;
+    const isDirty = useMemo(
+        () =>
+            name !== "" ||
+            slug !== "" ||
+            description !== "" ||
+            riskLevel !== "low",
+        [name, slug, description, riskLevel]
+    );
+
+    useEffect(() => {
+        onDirtyChange(isDirty);
+        return () => onDirtyChange(false);
+    }, [isDirty, onDirtyChange]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -1877,15 +2002,25 @@ function CreatePermissionModal({
         });
     };
 
+    const requestClose = () => {
+        if (isSaving) return;
+        if (isDirty) {
+            setShowDiscardPrompt(true);
+            return;
+        }
+        onClose();
+    };
+
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-            <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
+        <>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+                <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
                 <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-5">
                     <div>
                         <h3 className="text-xl font-semibold text-white">New permission</h3>
                         <p className="mt-1 text-sm text-white/45">Define name, slug, and risk level.</p>
                     </div>
-                    <button onClick={onClose} disabled={isSaving} className="btn btn-secondary text-xs px-3 py-1.5">
+                    <button onClick={requestClose} disabled={isSaving} className="btn btn-secondary text-xs px-3 py-1.5">
                         Close
                     </button>
                 </div>
@@ -1945,7 +2080,7 @@ function CreatePermissionModal({
                         </select>
                     </div>
                     <div className="flex justify-end gap-3 border-t border-white/10 pt-5">
-                        <button type="button" onClick={onClose} disabled={isSaving} className="btn btn-secondary">
+                        <button type="button" onClick={requestClose} disabled={isSaving} className="btn btn-secondary">
                             Cancel
                         </button>
                         <button
@@ -1957,8 +2092,20 @@ function CreatePermissionModal({
                         </button>
                     </div>
                 </form>
+                </div>
             </div>
-        </div>
+            {showDiscardPrompt && (
+                <DiscardChangesModal
+                    title="Discard unsaved changes?"
+                    message="You have unsaved changes in this permission form. If you close now, those changes will be lost."
+                    onCancel={() => setShowDiscardPrompt(false)}
+                    onConfirm={() => {
+                        setShowDiscardPrompt(false);
+                        onClose();
+                    }}
+                />
+            )}
+        </>
     );
 }
 
@@ -1968,6 +2115,7 @@ function EditPermissionModal({
     onClose,
     onSave,
     isSaving,
+    onDirtyChange,
 }: {
     permissions: Permission[];
     permission: Permission;
@@ -1980,6 +2128,7 @@ function EditPermissionModal({
         enabled: boolean;
     }) => Promise<unknown>;
     isSaving: boolean;
+    onDirtyChange: (value: boolean) => void;
 }) {
     const [name, setName] = useState(permission.name);
     const [slug, setSlug] = useState(permission.slug);
@@ -1990,6 +2139,7 @@ function EditPermissionModal({
     const [riskLevel, setRiskLevel] = useState<Permission["risk_level"]>(permission.risk_level);
     const [enabled, setEnabled] = useState(permission.enabled);
     const [submitted, setSubmitted] = useState(false);
+    const [showDiscardPrompt, setShowDiscardPrompt] = useState(false);
 
     const handleNameChange = (value: string) => {
         setName(value);
@@ -2009,6 +2159,20 @@ function EditPermissionModal({
         [name, slug, permissions, permission.id]
     );
     const canSubmit = !errors.name && !errors.slug;
+    const isDirty = useMemo(
+        () =>
+            name !== permission.name ||
+            slug !== permission.slug ||
+            description !== (permission.description ?? "") ||
+            riskLevel !== permission.risk_level ||
+            enabled !== permission.enabled,
+        [name, slug, description, riskLevel, enabled, permission]
+    );
+
+    useEffect(() => {
+        onDirtyChange(isDirty);
+        return () => onDirtyChange(false);
+    }, [isDirty, onDirtyChange]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -2023,15 +2187,25 @@ function EditPermissionModal({
         });
     };
 
+    const requestClose = () => {
+        if (isSaving) return;
+        if (isDirty) {
+            setShowDiscardPrompt(true);
+            return;
+        }
+        onClose();
+    };
+
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-            <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
+        <>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+                <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
                 <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-5">
                     <div>
                         <h3 className="text-xl font-semibold text-white">Edit permission</h3>
                         <p className="mt-1 text-sm text-white/45">Update metadata and deployment status.</p>
                     </div>
-                    <button onClick={onClose} disabled={isSaving} className="btn btn-secondary text-xs px-3 py-1.5">
+                    <button onClick={requestClose} disabled={isSaving} className="btn btn-secondary text-xs px-3 py-1.5">
                         Close
                     </button>
                 </div>
@@ -2115,7 +2289,7 @@ function EditPermissionModal({
                         </div>
                     </div>
                     <div className="flex justify-end gap-3 border-t border-white/10 pt-5">
-                        <button type="button" onClick={onClose} disabled={isSaving} className="btn btn-secondary">
+                        <button type="button" onClick={requestClose} disabled={isSaving} className="btn btn-secondary">
                             Cancel
                         </button>
                         <button
@@ -2127,8 +2301,20 @@ function EditPermissionModal({
                         </button>
                     </div>
                 </form>
+                </div>
             </div>
-        </div>
+            {showDiscardPrompt && (
+                <DiscardChangesModal
+                    title="Discard unsaved changes?"
+                    message="You have unsaved changes in this permission form. If you close now, those changes will be lost."
+                    onCancel={() => setShowDiscardPrompt(false)}
+                    onConfirm={() => {
+                        setShowDiscardPrompt(false);
+                        onClose();
+                    }}
+                />
+            )}
+        </>
     );
 }
 
@@ -2276,6 +2462,35 @@ function ConfirmDeleteModal({
                         className="btn btn-danger"
                     >
                         {isDeleting ? "Deleting..." : "Delete"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function DiscardChangesModal({
+    title,
+    message,
+    onCancel,
+    onConfirm,
+}: {
+    title: string;
+    message: string;
+    onCancel: () => void;
+    onConfirm: () => void;
+}) {
+    return (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
+                <h3 className="text-xl font-semibold text-white">{title}</h3>
+                <p className="mt-2 text-sm text-white/60">{message}</p>
+                <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
+                    <button type="button" onClick={onCancel} className="btn btn-secondary">
+                        Keep editing
+                    </button>
+                    <button type="button" onClick={onConfirm} className="btn btn-danger">
+                        Discard changes
                     </button>
                 </div>
             </div>
