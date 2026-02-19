@@ -251,10 +251,28 @@ function formatDateTimeDisplay(value: string | null) {
     return value.replace("T", " ").slice(0, 16);
 }
 
+function normalizeRiskLevel(
+    value: PermissionInput["risk_level"]
+): Permission["risk_level"] {
+    if (value === "low" || value === "medium" || value === "high") {
+        return value;
+    }
+    return "low";
+}
+
 function normalizePermission(raw: PermissionInput): Permission {
     return {
-        ...raw,
+        id: raw.id,
+        name: raw.name,
+        slug: raw.slug,
         description: raw.description ?? null,
+        enabled: Boolean(raw.enabled),
+        risk_level: normalizeRiskLevel(raw.risk_level),
+        usage_count: raw.usage_count ?? 0,
+        last_used_at: raw.last_used_at ?? null,
+        is_system: Boolean(raw.is_system),
+        created_at: raw.created_at,
+        updated_at: raw.updated_at ?? null,
         created_at_display: formatDateDisplay(raw.created_at),
         last_used_at_display: formatDateDisplay(raw.last_used_at),
     };
