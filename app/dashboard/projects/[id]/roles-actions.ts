@@ -127,13 +127,13 @@ async function hasDuplicateSlug(
     return { ok: true, exists: (data?.length ?? 0) > 0 } as const;
 }
 
-async function validatePermissionsBelongToProject(
+async function filterValidPermissionsBelongToProject(
     supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
     projectId: string,
     permissionIds: string[]
 ) {
     if (permissionIds.length === 0) {
-        return { ok: true } as const;
+        return { ok: true, validIds: [] as string[] } as const;
     }
 
     const { data, error } = await supabase
@@ -146,14 +146,9 @@ async function validatePermissionsBelongToProject(
         return { ok: false, error: "Failed to validate permissions." } as const;
     }
 
-    const validIds = new Set((data ?? []).map((row) => row.id));
-    const invalid = permissionIds.some((id) => !validIds.has(id));
-
-    if (invalid) {
-        return { ok: false, error: "Invalid permissions selected." } as const;
-    }
-
-    return { ok: true } as const;
+    const validIdSet = new Set((data ?? []).map((row) => row.id));
+    const validIds = permissionIds.filter((id) => validIdSet.has(id));
+    return { ok: true, validIds } as const;
 }
 
 export async function createRoleAction(
@@ -202,7 +197,7 @@ export async function createRoleAction(
         return { ok: false, error: "Role slug already exists." };
     }
 
-    const permissionsCheck = await validatePermissionsBelongToProject(
+    const permissionsCheck = await filterValidPermissionsBelongToProject(
         supabase,
         projectId,
         normalizedPermissionIds
@@ -215,7 +210,7 @@ export async function createRoleAction(
         name: normalizedName,
         slug: normalizedSlug,
         description: normalizedDescription,
-        permission_ids: normalizedPermissionIds,
+        permission_ids: permissionsCheck.validIds,
         is_system: Boolean(data.is_system),
     });
 
@@ -294,7 +289,7 @@ export async function updateRoleAction(
         return { ok: false, error: "Role slug already exists." };
     }
 
-    const permissionsCheck = await validatePermissionsBelongToProject(
+    const permissionsCheck = await filterValidPermissionsBelongToProject(
         supabase,
         projectId,
         normalizedPermissionIds
@@ -307,7 +302,7 @@ export async function updateRoleAction(
         name: normalizedName,
         slug: normalizedSlug,
         description: normalizedDescription,
-        permission_ids: normalizedPermissionIds,
+        permission_ids: permissionsCheck.validIds,
         is_system: Boolean(data.is_system),
     });
 

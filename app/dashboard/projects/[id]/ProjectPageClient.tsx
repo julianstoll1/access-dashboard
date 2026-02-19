@@ -919,6 +919,15 @@ function RoleEditorModal({
         );
     }, [availablePermissions, permissionSearch]);
 
+    const validPermissionIdSet = useMemo(
+        () => new Set(availablePermissions.map((permission) => permission.id)),
+        [availablePermissions]
+    );
+    const selectedPermissionsValid = useMemo(
+        () => selectedPermissions.filter((id) => validPermissionIdSet.has(id)),
+        [selectedPermissions, validPermissionIdSet]
+    );
+
     const togglePermission = (permissionId: string) => {
         setSelectedPermissions((prev) =>
             prev.includes(permissionId)
@@ -935,7 +944,7 @@ function RoleEditorModal({
             name: name.trim(),
             slug: slug.trim(),
             description: description.trim(),
-            permission_ids: selectedPermissions,
+            permission_ids: selectedPermissionsValid,
             is_system: isSystem,
         });
     };
@@ -1033,7 +1042,7 @@ function RoleEditorModal({
                                 Role permissions
                             </label>
                             <span className="text-xs text-white/45">
-                                {selectedPermissions.length} selected
+                                {selectedPermissionsValid.length} selected
                             </span>
                         </div>
                         <input
