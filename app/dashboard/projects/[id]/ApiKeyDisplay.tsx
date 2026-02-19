@@ -8,10 +8,11 @@ interface Props {
     projectId: string;
     apiKey: string;
     createdAt: string;
-    lastRotatedAt: string;
+    lastRotatedAt: string | null;
 }
 
-function formatDate(date: string) {
+function formatDate(date: string | null) {
+    if (!date) return "Never";
     return new Date(date).toLocaleString("de-DE", {
         year: "numeric",
         month: "2-digit",
