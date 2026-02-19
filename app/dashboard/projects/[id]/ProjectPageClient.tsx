@@ -398,6 +398,8 @@ function RolesManager({
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [editingRole, setEditingRole] = useState<Role | null>(null);
     const [deletingRole, setDeletingRole] = useState<Role | null>(null);
+    const [isRoleSaving, setIsRoleSaving] = useState(false);
+    const [isRoleDeleting, setIsRoleDeleting] = useState(false);
     const [viewingRoleId, setViewingRoleId] = useState<string | null>(null);
 
     const permissionById = useMemo(() => {
@@ -472,12 +474,17 @@ function RolesManager({
             permission_ids: string[];
             is_system: boolean;
         }) => {
-            const result = await createRoleActionRaw(projectId, data);
-            if (result.ok && result.data) {
-                setRoles((prev) => [normalizeRole(result.data), ...prev]);
-                setIsCreateOpen(false);
+            setIsRoleSaving(true);
+            try {
+                const result = await createRoleActionRaw(projectId, data);
+                if (result.ok && result.data) {
+                    setRoles((prev) => [normalizeRole(result.data), ...prev]);
+                    setIsCreateOpen(false);
+                }
+                return result;
+            } finally {
+                setIsRoleSaving(false);
             }
-            return result;
         },
         [projectId, setRoles]
     );
@@ -493,32 +500,42 @@ function RolesManager({
                 is_system: boolean;
             }
         ) => {
-            const result = await updateRoleActionRaw(projectId, id, data);
-            if (result.ok && result.data) {
-                setRoles((prev) =>
-                    prev.map((item) =>
-                        item.id === id ? normalizeRole(result.data) : item
-                    )
-                );
-                setEditingRole(null);
+            setIsRoleSaving(true);
+            try {
+                const result = await updateRoleActionRaw(projectId, id, data);
+                if (result.ok && result.data) {
+                    setRoles((prev) =>
+                        prev.map((item) =>
+                            item.id === id ? normalizeRole(result.data) : item
+                        )
+                    );
+                    setEditingRole(null);
+                }
+                return result;
+            } finally {
+                setIsRoleSaving(false);
             }
-            return result;
         },
         [projectId, setRoles]
     );
 
     const handleDelete = useCallback(async () => {
         if (!deletingRole || deletingRole.is_system) return;
-        const result = await deleteRoleAction(projectId, deletingRole.id);
-        if (result.ok) {
-            const id = deletingRole.id;
-            setRoles((prev) => prev.filter((item) => item.id !== id));
-            if (viewingRoleId === id) {
-                setViewingRoleId(null);
+        setIsRoleDeleting(true);
+        try {
+            const result = await deleteRoleAction(projectId, deletingRole.id);
+            if (result.ok) {
+                const id = deletingRole.id;
+                setRoles((prev) => prev.filter((item) => item.id !== id));
+                if (viewingRoleId === id) {
+                    setViewingRoleId(null);
+                }
+                setDeletingRole(null);
             }
-            setDeletingRole(null);
+            return result;
+        } finally {
+            setIsRoleDeleting(false);
         }
-        return result;
     }, [projectId, setRoles, deletingRole, viewingRoleId]);
 
     return (
@@ -546,8 +563,11 @@ function RolesManager({
                     mode="create"
                     roles={roles}
                     availablePermissions={availablePermissions}
-                    onClose={() => setIsCreateOpen(false)}
+                    onClose={() => {
+                        if (!isRoleSaving) setIsCreateOpen(false);
+                    }}
                     onSubmit={handleCreate}
+                    isSaving={isRoleSaving}
                 />
             )}
 
@@ -557,8 +577,11 @@ function RolesManager({
                     role={editingRole}
                     roles={roles}
                     availablePermissions={availablePermissions}
-                    onClose={() => setEditingRole(null)}
+                    onClose={() => {
+                        if (!isRoleSaving) setEditingRole(null);
+                    }}
                     onSubmit={(data) => handleUpdate(editingRole.id, data)}
+                    isSaving={isRoleSaving}
                 />
             )}
 
@@ -581,8 +604,11 @@ function RolesManager({
             {deletingRole && (
                 <ConfirmDeleteRoleModal
                     role={deletingRole}
-                    onClose={() => setDeletingRole(null)}
+                    onClose={() => {
+                        if (!isRoleDeleting) setDeletingRole(null);
+                    }}
                     onConfirm={handleDelete}
+                    isDeleting={isRoleDeleting}
                 />
             )}
         </>
@@ -824,6 +850,7 @@ function RoleEditorModal({
     availablePermissions,
     onClose,
     onSubmit,
+    isSaving,
 }: {
     mode: "create" | "edit";
     role?: Role;
@@ -837,6 +864,7 @@ function RoleEditorModal({
         permission_ids: string[];
         is_system: boolean;
     }) => Promise<unknown>;
+    isSaving: boolean;
 }) {
     const [name, setName] = useState(role?.name ?? "");
     const [slug, setSlug] = useState(role?.slug ?? "");
@@ -891,7 +919,7 @@ function RoleEditorModal({
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setSubmitted(true);
-        if (!canSubmit) return;
+        if (!canSubmit || isSaving) return;
         await onSubmit({
             name: name.trim(),
             slug: slug.trim(),
@@ -913,7 +941,7 @@ function RoleEditorModal({
                             Configure metadata and assign permissions from the Permissions tab.
                         </p>
                     </div>
-                    <button onClick={onClose} className="btn btn-secondary text-xs px-3 py-1.5">
+                    <button onClick={onClose} disabled={isSaving} className="btn btn-secondary text-xs px-3 py-1.5">
                         Close
                     </button>
                 </div>
@@ -1015,6 +1043,7 @@ function RoleEditorModal({
                                             type="checkbox"
                                             checked={checked}
                                             onChange={() => togglePermission(permission.id)}
+                                            disabled={isSaving}
                                             className="mt-0.5 h-4 w-4 rounded border-white/20 bg-[#0a0f16] text-white focus:ring-white/20"
                                         />
                                         <div className="min-w-0">
@@ -1037,15 +1066,15 @@ function RoleEditorModal({
                     </div>
 
                     <div className="flex justify-end gap-3 border-t border-white/10 pt-5">
-                        <button type="button" onClick={onClose} className="btn btn-secondary">
+                        <button type="button" onClick={onClose} disabled={isSaving} className="btn btn-secondary">
                             Cancel
                         </button>
                         <button
                             type="submit"
-                            disabled={!canSubmit}
+                            disabled={!canSubmit || isSaving}
                             className="btn btn-primary"
                         >
-                            {mode === "create" ? "Create role" : "Save role"}
+                            {isSaving ? "Saving..." : mode === "create" ? "Create role" : "Save role"}
                         </button>
                     </div>
                 </form>
@@ -1164,10 +1193,12 @@ function ConfirmDeleteRoleModal({
     role,
     onClose,
     onConfirm,
+    isDeleting,
 }: {
     role: Role;
     onClose: () => void;
     onConfirm: () => void;
+    isDeleting: boolean;
 }) {
     const isBlocked = role.is_system;
 
@@ -1181,15 +1212,15 @@ function ConfirmDeleteRoleModal({
                         : `Are you sure you want to delete ${role.name}?`}
                 </p>
                 <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
-                    <button onClick={onClose} className="btn btn-secondary">
+                    <button onClick={onClose} disabled={isDeleting} className="btn btn-secondary">
                         Cancel
                     </button>
                     <button
                         onClick={onConfirm}
-                        disabled={isBlocked}
+                        disabled={isBlocked || isDeleting}
                         className="btn btn-danger"
                     >
-                        Delete
+                        {isDeleting ? "Deleting..." : "Delete"}
                     </button>
                 </div>
             </div>
@@ -1214,6 +1245,9 @@ function PermissionsManager({
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [editingPermission, setEditingPermission] = useState<Permission | null>(null);
     const [deletingPermission, setDeletingPermission] = useState<Permission | null>(null);
+    const [savingPermissionMode, setSavingPermissionMode] = useState<"create" | "edit" | null>(null);
+    const [deletingPermissionId, setDeletingPermissionId] = useState<string | null>(null);
+    const [togglingPermissionId, setTogglingPermissionId] = useState<string | null>(null);
     const [viewingPermissionId, setViewingPermissionId] = useState<string | null>(null);
 
     const filteredPermissions = useMemo(() => {
@@ -1282,6 +1316,7 @@ function PermissionsManager({
     );
 
     const handleToggle = useCallback(async (permission: Permission) => {
+        setTogglingPermissionId(permission.id);
         const nextEnabled = !permission.enabled;
         setPermissions((prev) =>
             prev.map((item) =>
@@ -1290,15 +1325,19 @@ function PermissionsManager({
                     : item
             )
         );
-        const result = await togglePermissionAction(projectId, permission.id, nextEnabled);
-        if (!result.ok) {
-            setPermissions((prev) =>
-                prev.map((item) =>
-                    item.id === permission.id
-                        ? normalizePermission({ ...item, enabled: permission.enabled })
-                        : item
-                )
-            );
+        try {
+            const result = await togglePermissionAction(projectId, permission.id, nextEnabled);
+            if (!result.ok) {
+                setPermissions((prev) =>
+                    prev.map((item) =>
+                        item.id === permission.id
+                            ? normalizePermission({ ...item, enabled: permission.enabled })
+                            : item
+                    )
+                );
+            }
+        } finally {
+            setTogglingPermissionId(null);
         }
     }, [projectId, setPermissions]);
 
@@ -1309,12 +1348,17 @@ function PermissionsManager({
             description?: string;
             risk_level: Permission["risk_level"];
         }) => {
-            const result = await createPermissionActionRaw(projectId, data);
-            if (result.ok && result.data) {
-                setPermissions((prev) => [normalizePermission(result.data), ...prev]);
-                setIsCreateOpen(false);
+            setSavingPermissionMode("create");
+            try {
+                const result = await createPermissionActionRaw(projectId, data);
+                if (result.ok && result.data) {
+                    setPermissions((prev) => [normalizePermission(result.data), ...prev]);
+                    setIsCreateOpen(false);
+                }
+                return result;
+            } finally {
+                setSavingPermissionMode(null);
             }
-            return result;
         },
         [projectId, setPermissions]
     );
@@ -1327,38 +1371,48 @@ function PermissionsManager({
             risk_level: Permission["risk_level"];
             enabled: boolean;
         }) => {
+            setSavingPermissionMode("edit");
             setPermissions((prev) =>
                 prev.map((item) =>
                     item.id === id ? normalizePermission({ ...item, ...data }) : item
                 )
             );
-            const result = await updatePermissionActionRaw(id, data);
-            if (result.ok && result.data) {
-                setPermissions((prev) =>
-                    prev.map((item) =>
-                        item.id === id ? normalizePermission(result.data) : item
-                    )
-                );
-                setEditingPermission(null);
+            try {
+                const result = await updatePermissionActionRaw(id, data);
+                if (result.ok && result.data) {
+                    setPermissions((prev) =>
+                        prev.map((item) =>
+                            item.id === id ? normalizePermission(result.data) : item
+                        )
+                    );
+                    setEditingPermission(null);
+                }
+                return result;
+            } finally {
+                setSavingPermissionMode(null);
             }
-            return result;
         },
         [setPermissions]
     );
 
     const handleDelete = useCallback(async () => {
         if (!deletingPermission || deletingPermission.is_system) return;
-        const result = await deletePermissionAction(projectId, deletingPermission.id);
-        if (result.ok) {
-            setPermissions((prev) =>
-                prev.filter((item) => item.id !== deletingPermission.id)
-            );
-            if (viewingPermissionId === deletingPermission.id) {
-                setViewingPermissionId(null);
+        setDeletingPermissionId(deletingPermission.id);
+        try {
+            const result = await deletePermissionAction(projectId, deletingPermission.id);
+            if (result.ok) {
+                setPermissions((prev) =>
+                    prev.filter((item) => item.id !== deletingPermission.id)
+                );
+                if (viewingPermissionId === deletingPermission.id) {
+                    setViewingPermissionId(null);
+                }
+                setDeletingPermission(null);
             }
-            setDeletingPermission(null);
+            return result;
+        } finally {
+            setDeletingPermissionId(null);
         }
-        return result;
     }, [projectId, deletingPermission, viewingPermissionId, setPermissions]);
 
     return (
@@ -1379,6 +1433,7 @@ function PermissionsManager({
                 permissions={sortedPermissions}
                 onView={(permission) => setViewingPermissionId(permission.id)}
                 onToggle={handleToggle}
+                togglingPermissionId={togglingPermissionId}
                 onEdit={(permission) => setEditingPermission(permission)}
                 onDelete={(permission) => setDeletingPermission(permission)}
             />
@@ -1386,8 +1441,11 @@ function PermissionsManager({
             {isCreateOpen && (
                 <CreatePermissionModal
                     permissions={permissions}
-                    onClose={() => setIsCreateOpen(false)}
+                    onClose={() => {
+                        if (savingPermissionMode !== "create") setIsCreateOpen(false);
+                    }}
                     onCreate={handleCreate}
+                    isSaving={savingPermissionMode === "create"}
                 />
             )}
 
@@ -1395,8 +1453,11 @@ function PermissionsManager({
                 <EditPermissionModal
                     permissions={permissions}
                     permission={editingPermission}
-                    onClose={() => setEditingPermission(null)}
+                    onClose={() => {
+                        if (savingPermissionMode !== "edit") setEditingPermission(null);
+                    }}
                     onSave={handleUpdate}
+                    isSaving={savingPermissionMode === "edit"}
                 />
             )}
 
@@ -1418,8 +1479,11 @@ function PermissionsManager({
             {deletingPermission && (
                 <ConfirmDeleteModal
                     permission={deletingPermission}
-                    onClose={() => setDeletingPermission(null)}
+                    onClose={() => {
+                        if (deletingPermissionId !== deletingPermission.id) setDeletingPermission(null);
+                    }}
                     onConfirm={handleDelete}
+                    isDeleting={deletingPermissionId === deletingPermission.id}
                 />
             )}
         </>
@@ -1527,12 +1591,14 @@ function PermissionsTable({
     permissions,
     onView,
     onToggle,
+    togglingPermissionId,
     onEdit,
     onDelete,
 }: {
     permissions: Permission[];
     onView: (permission: Permission) => void;
     onToggle: (permission: Permission) => void;
+    togglingPermissionId: string | null;
     onEdit: (permission: Permission) => void;
     onDelete: (permission: Permission) => void;
 }) {
@@ -1554,6 +1620,7 @@ function PermissionsTable({
                         permission={permission}
                         onView={onView}
                         onToggle={onToggle}
+                        isToggling={togglingPermissionId === permission.id}
                         onEdit={onEdit}
                         onDelete={onDelete}
                     />
@@ -1573,12 +1640,14 @@ const PermissionRow = memo(function PermissionRow({
     permission,
     onView,
     onToggle,
+    isToggling,
     onEdit,
     onDelete,
 }: {
     permission: Permission;
     onView: (permission: Permission) => void;
     onToggle: (permission: Permission) => void;
+    isToggling: boolean;
     onEdit: (permission: Permission) => void;
     onDelete: (permission: Permission) => void;
 }) {
@@ -1634,13 +1703,14 @@ const PermissionRow = memo(function PermissionRow({
 
             <div className="min-w-0 flex items-center gap-3">
                 <span className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium ${statusColor}`}>
-                    {permission.enabled ? "Enabled" : "Disabled"}
+                    {isToggling ? "Saving..." : permission.enabled ? "Enabled" : "Disabled"}
                 </span>
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
                         onToggle(permission);
                     }}
+                    disabled={isToggling}
                     title={permission.enabled ? "Disable permission" : "Enable permission"}
                     aria-label={permission.enabled ? "Disable permission" : "Enable permission"}
                     className={`relative h-6 w-11 rounded-full border transition ${
@@ -1725,6 +1795,7 @@ function CreatePermissionModal({
     permissions,
     onClose,
     onCreate,
+    isSaving,
 }: {
     permissions: Permission[];
     onClose: () => void;
@@ -1734,6 +1805,7 @@ function CreatePermissionModal({
         description?: string;
         risk_level: Permission["risk_level"];
     }) => Promise<unknown>;
+    isSaving: boolean;
 }) {
     const [name, setName] = useState("");
     const [slug, setSlug] = useState("");
@@ -1763,7 +1835,7 @@ function CreatePermissionModal({
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setSubmitted(true);
-        if (!canSubmit) return;
+        if (!canSubmit || isSaving) return;
         await onCreate({
             name: name.trim(),
             slug: slug.trim(),
@@ -1780,7 +1852,7 @@ function CreatePermissionModal({
                         <h3 className="text-xl font-semibold text-white">New permission</h3>
                         <p className="mt-1 text-sm text-white/45">Define name, slug, and risk level.</p>
                     </div>
-                    <button onClick={onClose} className="btn btn-secondary text-xs px-3 py-1.5">
+                    <button onClick={onClose} disabled={isSaving} className="btn btn-secondary text-xs px-3 py-1.5">
                         Close
                     </button>
                 </div>
@@ -1840,15 +1912,15 @@ function CreatePermissionModal({
                         </select>
                     </div>
                     <div className="flex justify-end gap-3 border-t border-white/10 pt-5">
-                        <button type="button" onClick={onClose} className="btn btn-secondary">
+                        <button type="button" onClick={onClose} disabled={isSaving} className="btn btn-secondary">
                             Cancel
                         </button>
                         <button
                             type="submit"
-                            disabled={!canSubmit}
+                            disabled={!canSubmit || isSaving}
                             className="btn btn-primary"
                         >
-                            Create
+                            {isSaving ? "Saving..." : "Create"}
                         </button>
                     </div>
                 </form>
@@ -1862,6 +1934,7 @@ function EditPermissionModal({
     permission,
     onClose,
     onSave,
+    isSaving,
 }: {
     permissions: Permission[];
     permission: Permission;
@@ -1873,6 +1946,7 @@ function EditPermissionModal({
         risk_level: Permission["risk_level"];
         enabled: boolean;
     }) => Promise<unknown>;
+    isSaving: boolean;
 }) {
     const [name, setName] = useState(permission.name);
     const [slug, setSlug] = useState(permission.slug);
@@ -1906,7 +1980,7 @@ function EditPermissionModal({
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setSubmitted(true);
-        if (!canSubmit) return;
+        if (!canSubmit || isSaving) return;
         await onSave(permission.id, {
             name: name.trim(),
             slug: slug.trim(),
@@ -1924,7 +1998,7 @@ function EditPermissionModal({
                         <h3 className="text-xl font-semibold text-white">Edit permission</h3>
                         <p className="mt-1 text-sm text-white/45">Update metadata and deployment status.</p>
                     </div>
-                    <button onClick={onClose} className="btn btn-secondary text-xs px-3 py-1.5">
+                    <button onClick={onClose} disabled={isSaving} className="btn btn-secondary text-xs px-3 py-1.5">
                         Close
                     </button>
                 </div>
@@ -2008,15 +2082,15 @@ function EditPermissionModal({
                         </div>
                     </div>
                     <div className="flex justify-end gap-3 border-t border-white/10 pt-5">
-                        <button type="button" onClick={onClose} className="btn btn-secondary">
+                        <button type="button" onClick={onClose} disabled={isSaving} className="btn btn-secondary">
                             Cancel
                         </button>
                         <button
                             type="submit"
-                            disabled={!canSubmit}
+                            disabled={!canSubmit || isSaving}
                             className="btn btn-primary"
                         >
-                            Save
+                            {isSaving ? "Saving..." : "Save"}
                         </button>
                     </div>
                 </form>
@@ -2141,10 +2215,12 @@ function ConfirmDeleteModal({
     permission,
     onClose,
     onConfirm,
+    isDeleting,
 }: {
     permission: Permission;
     onClose: () => void;
     onConfirm: () => void;
+    isDeleting: boolean;
 }) {
     const isBlocked = permission.is_system;
 
@@ -2158,15 +2234,15 @@ function ConfirmDeleteModal({
                         : `Are you sure you want to delete ${permission.name}?`}
                 </p>
                 <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
-                    <button onClick={onClose} className="btn btn-secondary">
+                    <button onClick={onClose} disabled={isDeleting} className="btn btn-secondary">
                         Cancel
                     </button>
                     <button
                         onClick={onConfirm}
-                        disabled={isBlocked}
+                        disabled={isBlocked || isDeleting}
                         className="btn btn-danger"
                     >
-                        Delete
+                        {isDeleting ? "Deleting..." : "Delete"}
                     </button>
                 </div>
             </div>

@@ -12,20 +12,22 @@ export default function NewProjectPage() {
     async function handleCreate(e: React.FormEvent) {
         e.preventDefault();
         setLoading(true);
+        try {
+            const { error } = await supabase
+                .from("projects")
+                .insert({ name });
 
-        const { error } = await supabase
-            .from("projects")
-            .insert({ name });
+            if (error) {
+                alert(error.message);
+                console.error(error);
+                return;
+            }
 
-        if (error) {
-            alert(error.message);
-            console.error(error);
-            return;
+            router.push("/dashboard");
+            router.refresh();
+        } finally {
+            setLoading(false);
         }
-
-        setLoading(false);
-        router.push("/dashboard");
-        router.refresh();
     }
 
     return (
@@ -39,6 +41,7 @@ export default function NewProjectPage() {
                         placeholder="Project name"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
+                        disabled={loading}
                         required
                     />
 
