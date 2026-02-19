@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { rotateApiKey } from "./actions";
 import { CopyApiKeyButton } from "./CopyApiKeyButton";
+import { extractErrorMessage, useToast } from "@/components/feedback/ToastProvider";
 
 interface Props {
     projectId: string;
@@ -31,6 +32,7 @@ export function ApiKeyDisplay({
                               }: Props) {
     const [visible, setVisible] = useState(false);
     const [pending, startTransition] = useTransition();
+    const toast = useToast();
 
     const masked =
         apiKey.slice(0, 10) + "••••" + apiKey.slice(-4);
@@ -85,9 +87,14 @@ export function ApiKeyDisplay({
                         if (!confirmed) return;
 
                         startTransition(async () => {
-                            const formData = new FormData();
-                            formData.append("projectId", projectId);
-                            await rotateApiKey(formData);
+                            try {
+                                const formData = new FormData();
+                                formData.append("projectId", projectId);
+                                await rotateApiKey(formData);
+                                toast.success("API key rotated.");
+                            } catch (error) {
+                                toast.error(extractErrorMessage(error, "Failed to rotate API key."));
+                            }
                         });
                     }}
                     disabled={pending}

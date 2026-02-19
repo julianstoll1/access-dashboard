@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ApiKeyDisplay } from "./ApiKeyDisplay";
 import { GenerateApiKeyButton } from "./GenerateApiKeyButton";
 import { BackButton } from "./BackButton";
+import { useToast } from "@/components/feedback/ToastProvider";
 
 interface Props {
     project: {
@@ -390,6 +391,7 @@ function RolesManager({
     permissions: Permission[];
     projectId: string;
 }) {
+    const toast = useToast();
     const availablePermissions = useMemo(() => permissions ?? [], [permissions]);
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState("all");
@@ -477,16 +479,19 @@ function RolesManager({
             setIsRoleSaving(true);
             try {
                 const result = await createRoleActionRaw(projectId, data);
-                if (result.ok && result.data) {
+                if (result.ok) {
                     setRoles((prev) => [normalizeRole(result.data), ...prev]);
                     setIsCreateOpen(false);
+                    toast.success("Role created.");
+                } else {
+                    toast.error(result.error || "Failed to create role.");
                 }
                 return result;
             } finally {
                 setIsRoleSaving(false);
             }
         },
-        [projectId, setRoles]
+        [projectId, setRoles, toast]
     );
 
     const handleUpdate = useCallback(
@@ -503,20 +508,23 @@ function RolesManager({
             setIsRoleSaving(true);
             try {
                 const result = await updateRoleActionRaw(projectId, id, data);
-                if (result.ok && result.data) {
+                if (result.ok) {
                     setRoles((prev) =>
                         prev.map((item) =>
                             item.id === id ? normalizeRole(result.data) : item
                         )
                     );
                     setEditingRole(null);
+                    toast.success("Role saved.");
+                } else {
+                    toast.error(result.error || "Failed to save role.");
                 }
                 return result;
             } finally {
                 setIsRoleSaving(false);
             }
         },
-        [projectId, setRoles]
+        [projectId, setRoles, toast]
     );
 
     const handleDelete = useCallback(async () => {
@@ -531,12 +539,15 @@ function RolesManager({
                     setViewingRoleId(null);
                 }
                 setDeletingRole(null);
+                toast.success("Role deleted.");
+            } else {
+                toast.error(result.error || "Failed to delete role.");
             }
             return result;
         } finally {
             setIsRoleDeleting(false);
         }
-    }, [projectId, setRoles, deletingRole, viewingRoleId]);
+    }, [projectId, setRoles, deletingRole, viewingRoleId, toast]);
 
     return (
         <>
@@ -1237,6 +1248,7 @@ function PermissionsManager({
     setPermissions: React.Dispatch<React.SetStateAction<Permission[]>>;
     projectId: string;
 }) {
+    const toast = useToast();
     const [query, setQuery] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [riskFilter, setRiskFilter] = useState("all");
@@ -1335,11 +1347,14 @@ function PermissionsManager({
                             : item
                     )
                 );
+                toast.error(result.error || "Failed to update permission status.");
+            } else {
+                toast.success(nextEnabled ? "Permission enabled." : "Permission disabled.");
             }
         } finally {
             setTogglingPermissionId(null);
         }
-    }, [projectId, setPermissions]);
+    }, [projectId, setPermissions, toast]);
 
     const handleCreate = useCallback(
         async (data: {
@@ -1351,16 +1366,19 @@ function PermissionsManager({
             setSavingPermissionMode("create");
             try {
                 const result = await createPermissionActionRaw(projectId, data);
-                if (result.ok && result.data) {
+                if (result.ok) {
                     setPermissions((prev) => [normalizePermission(result.data), ...prev]);
                     setIsCreateOpen(false);
+                    toast.success("Permission created.");
+                } else {
+                    toast.error(result.error || "Failed to create permission.");
                 }
                 return result;
             } finally {
                 setSavingPermissionMode(null);
             }
         },
-        [projectId, setPermissions]
+        [projectId, setPermissions, toast]
     );
 
     const handleUpdate = useCallback(
@@ -1379,20 +1397,23 @@ function PermissionsManager({
             );
             try {
                 const result = await updatePermissionActionRaw(id, data);
-                if (result.ok && result.data) {
+                if (result.ok) {
                     setPermissions((prev) =>
                         prev.map((item) =>
                             item.id === id ? normalizePermission(result.data) : item
                         )
                     );
                     setEditingPermission(null);
+                    toast.success("Permission saved.");
+                } else {
+                    toast.error(result.error || "Failed to save permission.");
                 }
                 return result;
             } finally {
                 setSavingPermissionMode(null);
             }
         },
-        [setPermissions]
+        [setPermissions, toast]
     );
 
     const handleDelete = useCallback(async () => {
@@ -1408,12 +1429,15 @@ function PermissionsManager({
                     setViewingPermissionId(null);
                 }
                 setDeletingPermission(null);
+                toast.success("Permission deleted.");
+            } else {
+                toast.error(result.error || "Failed to delete permission.");
             }
             return result;
         } finally {
             setDeletingPermissionId(null);
         }
-    }, [projectId, deletingPermission, viewingPermissionId, setPermissions]);
+    }, [projectId, deletingPermission, viewingPermissionId, setPermissions, toast]);
 
     return (
         <>

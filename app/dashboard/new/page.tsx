@@ -3,9 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { useToast } from "@/components/feedback/ToastProvider";
 
 export default function NewProjectPage() {
     const router = useRouter();
+    const toast = useToast();
     const [name, setName] = useState("");
     const [loading, setLoading] = useState(false);
 
@@ -18,11 +20,11 @@ export default function NewProjectPage() {
                 .insert({ name });
 
             if (error) {
-                alert(error.message);
-                console.error(error);
+                toast.error(error.message || "Failed to create project.");
                 return;
             }
 
+            toast.success("Project created.");
             router.push("/dashboard");
             router.refresh();
         } finally {

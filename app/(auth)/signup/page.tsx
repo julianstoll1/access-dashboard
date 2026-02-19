@@ -4,9 +4,11 @@ import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useToast } from "@/components/feedback/ToastProvider";
 
 export default function SignupPage() {
     const router = useRouter();
+    const toast = useToast();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState<string | null>(null);
@@ -26,10 +28,12 @@ export default function SignupPage() {
 
         if (error) {
             setError(error.message);
+            toast.error(error.message || "Account creation failed.");
             return;
         }
 
         // Ensure session state updates after signup
+        toast.success("Account created.");
         router.push("/dashboard");
         router.refresh();
     }

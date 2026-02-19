@@ -4,9 +4,11 @@ import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useToast } from "@/components/feedback/ToastProvider";
 
 export default function LoginPage() {
     const router = useRouter();
+    const toast = useToast();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState<string | null>(null);
@@ -26,10 +28,12 @@ export default function LoginPage() {
 
         if (error) {
             setError(error.message);
+            toast.error(error.message || "Sign-in failed.");
             return;
         }
 
         // Ensure session state updates after login
+        toast.success("Signed in successfully.");
         router.push("/dashboard");
         router.refresh();
     }
