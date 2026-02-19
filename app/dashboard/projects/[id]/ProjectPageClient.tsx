@@ -933,7 +933,10 @@ function RoleEditorModal({
                         </div>
 
                         <div>
-                            <label className="text-xs uppercase tracking-[0.14em] text-white/45">Slug</label>
+                            <label className="inline-flex items-center gap-1 text-xs uppercase tracking-[0.14em] text-white/45">
+                                Slug
+                                <InfoTip text="A slug is the short ID of this role. It is used in API calls and access rules. It is auto-filled from the name. Use lowercase letters, numbers, and dots. It must be unique." />
+                            </label>
                             <input
                                 value={slug}
                                 onChange={(e) => {
@@ -942,7 +945,6 @@ function RoleEditorModal({
                                 }}
                                 className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm font-mono text-white focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
                             />
-                            <p className="mt-2 text-xs text-white/35">Auto-suggested from name until edited.</p>
                             {(submitted || slug.length > 0) && errors.slug && (
                                 <p className="mt-2 text-xs text-red-300">{errors.slug}</p>
                             )}
@@ -959,13 +961,15 @@ function RoleEditorModal({
                             />
                         </div>
                         <div className="rounded-xl border border-white/10 bg-[#0a0f16] px-4 py-3">
-                            <p className="text-xs uppercase tracking-[0.14em] text-white/45">Type</p>
+                            <p className="inline-flex items-center gap-1 text-xs uppercase tracking-[0.14em] text-white/45">
+                                Type
+                                <InfoTip text="System roles are built-in and protected. Custom roles are for your own setup." />
+                            </p>
                             <div className="mt-3 flex items-center justify-between">
                                 <div>
                                     <p className="text-sm text-white/90">
                                         {isSystem ? "System role" : "Custom role"}
                                     </p>
-                                    <p className="text-xs text-white/40">System roles are protected from deletion.</p>
                                 </div>
                                 <button
                                     type="button"
@@ -1088,11 +1092,17 @@ function RoleDetailModal({
                         <p className="mt-2 text-base font-semibold text-white">{role.name}</p>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Slug</p>
+                        <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.14em] text-white/45">
+                            Slug
+                            <InfoTip text="A slug is the short ID of this role. It is used in API calls and access rules. Use lowercase letters, numbers, and dots. It must be unique." />
+                        </p>
                         <p className="mt-2 truncate font-mono text-sm text-white/85">{role.slug}</p>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Type</p>
+                        <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.14em] text-white/45">
+                            Type
+                            <InfoTip text="System roles are protected. Custom roles are fully editable." />
+                        </p>
                         <p className="mt-2 text-sm text-white/85">{role.is_system ? "System role" : "Custom role"}</p>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4 sm:col-span-2">
@@ -1788,7 +1798,10 @@ function CreatePermissionModal({
                             )}
                         </div>
                         <div>
-                            <label className="text-xs uppercase tracking-[0.14em] text-white/45">Slug</label>
+                            <label className="inline-flex items-center gap-1 text-xs uppercase tracking-[0.14em] text-white/45">
+                                Slug
+                                <InfoTip text="A slug is the short ID of this permission. It is used in API checks and rules. It is auto-filled from the name. Use lowercase letters, numbers, and dots. It must be unique." />
+                            </label>
                             <input
                                 value={slug}
                                 onChange={(e) => {
@@ -1797,7 +1810,6 @@ function CreatePermissionModal({
                                 }}
                                 className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm font-mono text-white focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
                             />
-                            <p className="mt-2 text-xs text-white/35">Auto-suggested from name until edited.</p>
                             {(submitted || slug.length > 0) && errors.slug && (
                                 <p className="mt-2 text-xs text-red-300">{errors.slug}</p>
                             )}
@@ -1813,7 +1825,10 @@ function CreatePermissionModal({
                         />
                     </div>
                     <div>
-                        <label className="text-xs uppercase tracking-[0.14em] text-white/45">Risk level</label>
+                        <label className="inline-flex items-center gap-1 text-xs uppercase tracking-[0.14em] text-white/45">
+                            Risk level
+                            <InfoTip text="Choose how sensitive this permission is: low, medium, or high. Higher levels should be reviewed more carefully." />
+                        </label>
                         <select
                             value={riskLevel}
                             onChange={(e) => setRiskLevel(e.target.value as Permission["risk_level"])}
@@ -1927,7 +1942,10 @@ function EditPermissionModal({
                             )}
                         </div>
                         <div>
-                            <label className="text-xs uppercase tracking-[0.14em] text-white/45">Slug</label>
+                            <label className="inline-flex items-center gap-1 text-xs uppercase tracking-[0.14em] text-white/45">
+                                Slug
+                                <InfoTip text="A slug is the short ID of this permission (for example: feature.export). It is used in API checks and rules. Use lowercase letters, numbers, and dots. It must be unique." />
+                            </label>
                             <input
                                 value={slug}
                                 onChange={(e) => {
@@ -1974,7 +1992,10 @@ function EditPermissionModal({
                             </div>
                         </div>
                         <div>
-                            <label className="text-xs uppercase tracking-[0.14em] text-white/45">Risk level</label>
+                            <label className="inline-flex items-center gap-1 text-xs uppercase tracking-[0.14em] text-white/45">
+                                Risk level
+                                <InfoTip text="Higher risk means this permission should have stricter review and rollout checks." />
+                            </label>
                             <select
                                 value={riskLevel}
                                 onChange={(e) => setRiskLevel(e.target.value as Permission["risk_level"])}
@@ -2058,7 +2079,10 @@ function PermissionDetailModal({
                         </span>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Risk</p>
+                        <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.14em] text-white/45">
+                            Risk
+                            <InfoTip text="Shows how sensitive this permission is, so teams can prioritize review and safeguards." />
+                        </p>
                         <span className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${riskColor}`}>
                             {permission.risk_level}
                         </span>
@@ -2080,7 +2104,10 @@ function PermissionDetailModal({
                         <p className="mt-2 text-sm text-white/85">{formatDateTimeDisplay(permission.updated_at)}</p>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4 sm:col-span-2">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Type</p>
+                        <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.14em] text-white/45">
+                            Type
+                            <InfoTip text="System permissions are built-in and protected. Custom permissions are for your own feature access rules." />
+                        </p>
                         <p className="mt-2 text-sm text-white/85">{permission.is_system ? "System permission" : "Custom permission"}</p>
                     </div>
                 </div>
@@ -2184,6 +2211,40 @@ function Section({ title, children }: { title: string; children: React.ReactNode
                 {children}
             </div>
         </section>
+    );
+}
+
+function InfoTip({ text }: { text: string }) {
+    return (
+        <span className="group relative ml-1 inline-flex shrink-0 items-center align-middle">
+            <button
+                type="button"
+                aria-label={text}
+                className="m-0 inline-flex h-4 w-4 appearance-none items-center justify-center rounded-sm p-0 text-white/35 outline-none transition hover:text-white/70 focus:text-white/70"
+            >
+                <svg
+                    viewBox="0 0 20 20"
+                    aria-hidden="true"
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                >
+                    <circle cx="10" cy="10" r="7.25" />
+                    <path d="M10 9v4" />
+                    <circle cx="10" cy="6.5" r="0.7" fill="currentColor" stroke="none" />
+                </svg>
+            </button>
+            <span
+                role="tooltip"
+                className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 w-64 -translate-x-1/2 rounded-md border border-white/10 bg-[#0c121b]/95 px-3 py-2 text-[11px] font-normal normal-case tracking-normal text-white/80 opacity-0 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-sm transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-hover:scale-100 group-focus-within:translate-y-0 group-focus-within:opacity-100 group-focus-within:scale-100 translate-y-1 scale-[0.98]"
+            >
+                <span className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 border-l border-t border-white/10 bg-[#0c121b]/95" />
+                {text}
+            </span>
+        </span>
     );
 }
 
