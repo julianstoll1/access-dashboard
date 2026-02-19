@@ -44,7 +44,7 @@ export default function NewProjectPage() {
 
                     <button
                         disabled={loading}
-                        className="w-full rounded-md bg-white py-2 text-sm font-medium text-black"
+                        className="btn btn-primary w-full"
                     >
                         {loading ? "Creating…" : "Create project"}
                     </button>

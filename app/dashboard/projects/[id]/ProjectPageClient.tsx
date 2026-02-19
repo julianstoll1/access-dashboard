@@ -656,7 +656,7 @@ function RoleFilterBar({
                 <button
                     type="button"
                     onClick={onCreate}
-                    className="h-10 w-full shrink-0 whitespace-nowrap rounded-lg bg-white px-3.5 text-sm font-semibold text-black transition hover:bg-white/90 focus:outline-none focus:ring-2 focus:ring-white/20 lg:h-11 lg:w-auto lg:min-w-[168px]"
+                    className="btn btn-primary h-10 w-full shrink-0 whitespace-nowrap lg:h-11 lg:w-auto lg:min-w-[168px]"
                 >
                     + New Role
                 </button>
@@ -787,7 +787,7 @@ const RoleListRow = memo(function RoleListRow({
                     }}
                     title="Edit role"
                     aria-label="Edit role"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.02] text-white/65 transition hover:border-white/25 hover:text-white"
+                    className="btn-icon btn-icon-secondary"
                 >
                     <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
                         <path d="M3 14.8V17h2.2L15.6 6.6a1.55 1.55 0 0 0 0-2.2l-.02-.02a1.55 1.55 0 0 0-2.2 0L3 14.8Z" />
@@ -804,7 +804,7 @@ const RoleListRow = memo(function RoleListRow({
                     disabled={role.is_system}
                     title={role.is_system ? "System roles cannot be deleted" : "Delete role"}
                     aria-label="Delete role"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-400/20 bg-red-500/10 text-red-300 transition hover:border-red-300/40 hover:text-red-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.02] disabled:text-white/30"
+                    className="btn-icon btn-icon-danger"
                 >
                     <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
                         <path d="M4 6h12" />
@@ -910,10 +910,10 @@ function RoleEditorModal({
                             {mode === "create" ? "New role" : "Edit role"}
                         </h3>
                         <p className="mt-1 text-sm text-white/45">
-                            Metadaten festlegen und Permissions aus dem Permissions-Tab zuweisen.
+                            Configure metadata and assign permissions from the Permissions tab.
                         </p>
                     </div>
-                    <button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:border-white/25 hover:text-white">
+                    <button onClick={onClose} className="btn btn-secondary text-xs px-3 py-1.5">
                         Close
                     </button>
                 </div>
@@ -987,7 +987,7 @@ function RoleEditorModal({
                     <div>
                         <div className="mb-2 flex items-center justify-between">
                             <label className="text-xs uppercase tracking-[0.14em] text-white/45">
-                                Roles-Permissions
+                                Role permissions
                             </label>
                             <span className="text-xs text-white/45">
                                 {selectedPermissions.length} selected
@@ -996,7 +996,7 @@ function RoleEditorModal({
                         <input
                             value={permissionSearch}
                             onChange={(e) => setPermissionSearch(e.target.value)}
-                            placeholder="Permissions nach Name oder Slug filtern"
+                            placeholder="Filter permissions by name or slug"
                             className="h-10 w-full rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm text-white placeholder:text-white/35 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
                         />
                         <div className="mt-3 max-h-64 space-y-2 overflow-y-auto rounded-xl border border-white/10 bg-[#0a0f16] p-3">
@@ -1033,13 +1033,13 @@ function RoleEditorModal({
                     </div>
 
                     <div className="flex justify-end gap-3 border-t border-white/10 pt-5">
-                        <button type="button" onClick={onClose} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/70 hover:border-white/20 hover:text-white">
+                        <button type="button" onClick={onClose} className="btn btn-secondary">
                             Cancel
                         </button>
                         <button
                             type="submit"
                             disabled={!canSubmit}
-                            className="rounded-xl bg-white px-5 py-2 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="btn btn-primary"
                         >
                             {mode === "create" ? "Create role" : "Save role"}
                         </button>
@@ -1074,10 +1074,10 @@ function RoleDetailModal({
                     <div>
                         <h3 className="text-xl font-semibold text-white">Role details</h3>
                         <p className="mt-1 text-sm text-white/45">
-                            Assigned permissions und Metadaten dieser Role.
+                            Assigned permissions and metadata for this role.
                         </p>
                     </div>
-                    <button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:border-white/25 hover:text-white">
+                    <button onClick={onClose} className="btn btn-secondary text-xs px-3 py-1.5">
                         Close
                     </button>
                 </div>
@@ -1126,13 +1126,13 @@ function RoleDetailModal({
                 </div>
 
                 <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
-                    <button type="button" onClick={onClose} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/70 hover:border-white/20 hover:text-white">
+                    <button type="button" onClick={onClose} className="btn btn-secondary">
                         Close
                     </button>
                     <button
                         type="button"
                         onClick={() => onEdit(role)}
-                        className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-white hover:border-white/30"
+                        className="btn btn-secondary"
                     >
                         Edit role
                     </button>
@@ -1140,7 +1140,7 @@ function RoleDetailModal({
                         type="button"
                         onClick={() => onDelete(role)}
                         disabled={role.is_system}
-                        className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="btn btn-danger"
                     >
                         Delete
                     </button>
@@ -1171,13 +1171,13 @@ function ConfirmDeleteRoleModal({
                         : `Are you sure you want to delete ${role.name}?`}
                 </p>
                 <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
-                    <button onClick={onClose} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/70 hover:border-white/20 hover:text-white">
+                    <button onClick={onClose} className="btn btn-secondary">
                         Cancel
                     </button>
                     <button
                         onClick={onConfirm}
                         disabled={isBlocked}
-                        className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="btn btn-danger"
                     >
                         Delete
                     </button>
@@ -1504,7 +1504,7 @@ function FilterBar({
                 <button
                     type="button"
                     onClick={onCreate}
-                    className="h-10 w-full shrink-0 whitespace-nowrap rounded-lg bg-white px-3.5 text-sm font-semibold text-black transition hover:bg-white/90 focus:outline-none focus:ring-2 focus:ring-white/20 lg:h-11 lg:w-auto lg:min-w-[168px]"
+                    className="btn btn-primary h-10 w-full shrink-0 whitespace-nowrap lg:h-11 lg:w-auto lg:min-w-[168px]"
                 >
                     + New Permission
                 </button>
@@ -1661,7 +1661,7 @@ const PermissionRow = memo(function PermissionRow({
                     }}
                     title={copied ? "Copied" : "Copy slug"}
                     aria-label={copied ? "Copied" : "Copy slug"}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.02] text-white/65 transition hover:border-white/25 hover:text-white"
+                    className="btn-icon btn-icon-secondary"
                 >
                     {copied ? (
                         <svg viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor">
@@ -1681,7 +1681,7 @@ const PermissionRow = memo(function PermissionRow({
                     }}
                     title="Edit permission"
                     aria-label="Edit permission"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.02] text-white/65 transition hover:border-white/25 hover:text-white"
+                    className="btn-icon btn-icon-secondary"
                 >
                     <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
                         <path d="M3 14.8V17h2.2L15.6 6.6a1.55 1.55 0 0 0 0-2.2l-.02-.02a1.55 1.55 0 0 0-2.2 0L3 14.8Z" />
@@ -1698,7 +1698,7 @@ const PermissionRow = memo(function PermissionRow({
                     disabled={permission.is_system}
                     title={permission.is_system ? "System permissions cannot be deleted" : "Delete permission"}
                     aria-label="Delete permission"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-400/20 bg-red-500/10 text-red-300 transition hover:border-red-300/40 hover:text-red-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.02] disabled:text-white/30"
+                    className="btn-icon btn-icon-danger"
                 >
                     <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
                         <path d="M4 6h12" />
@@ -1768,9 +1768,9 @@ function CreatePermissionModal({
                 <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-5">
                     <div>
                         <h3 className="text-xl font-semibold text-white">New permission</h3>
-                        <p className="mt-1 text-sm text-white/45">Name, Slug und Riskstufe festlegen.</p>
+                        <p className="mt-1 text-sm text-white/45">Define name, slug, and risk level.</p>
                     </div>
-                    <button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:border-white/25 hover:text-white">
+                    <button onClick={onClose} className="btn btn-secondary text-xs px-3 py-1.5">
                         Close
                     </button>
                 </div>
@@ -1813,7 +1813,7 @@ function CreatePermissionModal({
                         />
                     </div>
                     <div>
-                        <label className="text-xs uppercase tracking-[0.14em] text-white/45">Riskstufe</label>
+                        <label className="text-xs uppercase tracking-[0.14em] text-white/45">Risk level</label>
                         <select
                             value={riskLevel}
                             onChange={(e) => setRiskLevel(e.target.value as Permission["risk_level"])}
@@ -1825,13 +1825,13 @@ function CreatePermissionModal({
                         </select>
                     </div>
                     <div className="flex justify-end gap-3 border-t border-white/10 pt-5">
-                        <button type="button" onClick={onClose} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/70 hover:border-white/20 hover:text-white">
+                        <button type="button" onClick={onClose} className="btn btn-secondary">
                             Cancel
                         </button>
                         <button
                             type="submit"
                             disabled={!canSubmit}
-                            className="rounded-xl bg-white px-5 py-2 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="btn btn-primary"
                         >
                             Create
                         </button>
@@ -1907,9 +1907,9 @@ function EditPermissionModal({
                 <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-5">
                     <div>
                         <h3 className="text-xl font-semibold text-white">Edit permission</h3>
-                        <p className="mt-1 text-sm text-white/45">Metadaten und Status aktualisieren.</p>
+                        <p className="mt-1 text-sm text-white/45">Update metadata and deployment status.</p>
                     </div>
-                    <button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:border-white/25 hover:text-white">
+                    <button onClick={onClose} className="btn btn-secondary text-xs px-3 py-1.5">
                         Close
                     </button>
                 </div>
@@ -1974,7 +1974,7 @@ function EditPermissionModal({
                             </div>
                         </div>
                         <div>
-                            <label className="text-xs uppercase tracking-[0.14em] text-white/45">Riskstufe</label>
+                            <label className="text-xs uppercase tracking-[0.14em] text-white/45">Risk level</label>
                             <select
                                 value={riskLevel}
                                 onChange={(e) => setRiskLevel(e.target.value as Permission["risk_level"])}
@@ -1987,13 +1987,13 @@ function EditPermissionModal({
                         </div>
                     </div>
                     <div className="flex justify-end gap-3 border-t border-white/10 pt-5">
-                        <button type="button" onClick={onClose} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/70 hover:border-white/20 hover:text-white">
+                        <button type="button" onClick={onClose} className="btn btn-secondary">
                             Cancel
                         </button>
                         <button
                             type="submit"
                             disabled={!canSubmit}
-                            className="rounded-xl bg-white px-5 py-2 text-sm font-semibold text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="btn btn-primary"
                         >
                             Save
                         </button>
@@ -2033,7 +2033,7 @@ function PermissionDetailModal({
                         <h3 className="text-xl font-semibold text-white">Permission details</h3>
                         <p className="mt-1 text-sm text-white/45">Full permission metadata and usage details.</p>
                     </div>
-                    <button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:border-white/25 hover:text-white">
+                    <button onClick={onClose} className="btn btn-secondary text-xs px-3 py-1.5">
                         Close
                     </button>
                 </div>
@@ -2086,13 +2086,13 @@ function PermissionDetailModal({
                 </div>
 
                 <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
-                    <button type="button" onClick={onClose} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/70 hover:border-white/20 hover:text-white">
+                    <button type="button" onClick={onClose} className="btn btn-secondary">
                         Close
                     </button>
                     <button
                         type="button"
                         onClick={() => onEdit(permission)}
-                        className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-white hover:border-white/30"
+                        className="btn btn-secondary"
                     >
                         Edit permission
                     </button>
@@ -2100,7 +2100,7 @@ function PermissionDetailModal({
                         type="button"
                         onClick={() => onDelete(permission)}
                         disabled={permission.is_system}
-                        className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="btn btn-danger"
                     >
                         Delete
                     </button>
@@ -2131,13 +2131,13 @@ function ConfirmDeleteModal({
                         : `Are you sure you want to delete ${permission.name}?`}
                 </p>
                 <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
-                    <button onClick={onClose} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/70 hover:border-white/20 hover:text-white">
+                    <button onClick={onClose} className="btn btn-secondary">
                         Cancel
                     </button>
                     <button
                         onClick={onConfirm}
                         disabled={isBlocked}
-                        className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="btn btn-danger"
                     >
                         Delete
                     </button>

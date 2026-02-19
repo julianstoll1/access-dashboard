@@ -11,13 +11,13 @@ export default function Home() {
                 <div className="mt-8 flex gap-3">
                     <Link
                         href="/login"
-                        className="rounded-xl border border-white/20 px-5 py-2.5 text-sm font-medium text-white hover:border-white/35"
+                        className="btn btn-secondary"
                     >
                         Sign in
                     </Link>
                     <Link
                         href="/dashboard"
-                        className="rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-black hover:bg-white/90"
+                        className="btn btn-primary"
                     >
                         Go to Dashboard
                     </Link>

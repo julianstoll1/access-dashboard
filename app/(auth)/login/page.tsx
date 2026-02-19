@@ -70,7 +70,7 @@ export default function LoginPage() {
 
                 <button
                     disabled={loading}
-                    className="w-full rounded-md bg-white text-black py-2 text-sm font-medium hover:bg-white/90 disabled:opacity-50"
+                    className="btn btn-primary w-full"
                 >
                     {loading ? "Signing in…" : "Sign in"}
                 </button>

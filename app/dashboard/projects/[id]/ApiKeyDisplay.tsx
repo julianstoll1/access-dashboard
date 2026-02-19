@@ -91,7 +91,7 @@ export function ApiKeyDisplay({
                         });
                     }}
                     disabled={pending}
-                    className="mt-4 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 hover:bg-red-500/20 disabled:opacity-50 transition"
+                    className="btn btn-danger-secondary mt-4"
                 >
                     {pending ? "Rotating…" : "Rotate API key"}
                 </button>

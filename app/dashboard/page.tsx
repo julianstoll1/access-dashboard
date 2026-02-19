@@ -18,7 +18,7 @@ export default async function DashboardPage() {
                     <div className="flex items-center gap-4">
                         <a
                             href="/dashboard/new"
-                            className="rounded-xl bg-white px-5 py-2.5 text-sm font-medium text-black hover:bg-white/90 transition"
+                            className="btn btn-primary"
                         >
                             + New Project
                         </a>
@@ -132,7 +132,7 @@ function EmptyState() {
 
             <a
                 href="/dashboard/new"
-                className="mt-8 inline-block rounded-xl bg-white px-6 py-3 text-sm font-medium text-black hover:bg-white/90"
+                className="btn btn-primary mt-8 inline-flex"
             >
                 Create project
             </a>
