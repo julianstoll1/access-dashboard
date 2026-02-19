@@ -1490,7 +1490,7 @@ function FilterBar({
                         </span>
                         <select
                             value={sortKey}
-                            onChange={(e) => onSortChange(e.target.value)}
+                            onChange={(e) => onSortChange(e.target.value as SortKey)}
                             className="h-11 rounded-xl border border-white/10 bg-[#0a0f16] px-3 text-sm text-white/85 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
                         >
                             <option value="name">Name</option>
