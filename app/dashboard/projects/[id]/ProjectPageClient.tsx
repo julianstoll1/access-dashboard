@@ -418,6 +418,30 @@ function validateRoleForm({
     return errors;
 }
 
+function buildUniqueRoleName(baseName: string, roles: Role[]) {
+    const base = (baseName || "Role").trim();
+    const existing = new Set(roles.map((role) => role.name.trim().toLowerCase()));
+    let candidate = `${base} Copy`;
+    let index = 2;
+    while (existing.has(candidate.toLowerCase())) {
+        candidate = `${base} Copy ${index}`;
+        index += 1;
+    }
+    return candidate;
+}
+
+function buildUniqueRoleSlug(baseSlug: string, roles: Role[]) {
+    const normalizedBase = slugify(baseSlug) || "role";
+    const existing = new Set(roles.map((role) => role.slug));
+    let candidate = `${normalizedBase}.copy`;
+    let index = 2;
+    while (existing.has(candidate)) {
+        candidate = `${normalizedBase}.copy${index}`;
+        index += 1;
+    }
+    return candidate;
+}
+
 function RolesManager({
     roles,
     setRoles,
@@ -597,6 +621,33 @@ function RolesManager({
         }
     }, [projectId, setRoles, deletingRole, viewingRoleId, toast]);
 
+    const handleDuplicate = useCallback(
+        async (role: Role) => {
+            setIsRoleSaving(true);
+            try {
+                const duplicateName = buildUniqueRoleName(role.name, roles);
+                const duplicateSlug = buildUniqueRoleSlug(role.slug, roles);
+                const result = await createRoleActionRaw(projectId, {
+                    name: duplicateName,
+                    slug: duplicateSlug,
+                    description: role.description ?? "",
+                    permission_ids: role.permission_ids,
+                    is_system: role.is_system,
+                });
+                if (result.ok) {
+                    setRoles((prev) => [normalizeRole(result.data), ...prev]);
+                    toast.success("Role duplicated.");
+                } else {
+                    toast.error(result.error || "Failed to duplicate role.");
+                }
+                return result;
+            } finally {
+                setIsRoleSaving(false);
+            }
+        },
+        [projectId, roles, setRoles, toast]
+    );
+
     return (
         <>
             <RoleFilterBar
@@ -615,6 +666,7 @@ function RolesManager({
                 onView={(role) => setViewingRoleId(role.id)}
                 onEdit={(role) => setEditingRole(role)}
                 onDelete={(role) => setDeletingRole(role)}
+                isBusy={isRoleSaving}
             />
 
             {isCreateOpen && (
@@ -651,6 +703,13 @@ function RolesManager({
                     role={viewingRole}
                     permissionById={permissionById}
                     onClose={() => setViewingRoleId(null)}
+                    onDuplicate={async (role) => {
+                        const result = await handleDuplicate(role);
+                        if (result?.ok) {
+                            setViewingRoleId(null);
+                            setEditingRole(normalizeRole(result.data));
+                        }
+                    }}
                     onEdit={(role) => {
                         setViewingRoleId(null);
                         setEditingRole(role);
@@ -659,6 +718,7 @@ function RolesManager({
                         setViewingRoleId(null);
                         setDeletingRole(role);
                     }}
+                    isBusy={isRoleSaving}
                 />
             )}
 
@@ -758,17 +818,19 @@ function RolesTable({
     onView,
     onEdit,
     onDelete,
+    isBusy,
 }: {
     roles: Role[];
     permissionById: Map<string, Permission>;
     onView: (role: Role) => void;
     onEdit: (role: Role) => void;
     onDelete: (role: Role) => void;
+    isBusy: boolean;
 }) {
     return (
         <div className="mt-6 w-full min-w-0 max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-[#0f141d] shadow-[0_20px_45px_-30px_rgba(0,0,0,0.9)] lg:overflow-x-hidden">
             <div className="min-w-[980px] max-w-full lg:min-w-0 lg:w-full">
-                <div className="grid grid-cols-[minmax(260px,2fr)_200px_130px_170px_130px_160px] border-b border-white/10 bg-[#111827] px-6 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white/45 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.6fr)_minmax(0,0.8fr)]">
+                <div className="grid grid-cols-[minmax(260px,2fr)_200px_130px_170px_130px_190px] border-b border-white/10 bg-[#111827] px-6 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white/45 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.6fr)_minmax(0,1fr)]">
                     <span className="whitespace-nowrap">Role</span>
                     <span className="whitespace-nowrap">Slug</span>
                     <span className="whitespace-nowrap">Type</span>
@@ -785,6 +847,7 @@ function RolesTable({
                         onView={onView}
                         onEdit={onEdit}
                         onDelete={onDelete}
+                        isBusy={isBusy}
                     />
                 ))}
 
@@ -804,12 +867,14 @@ const RoleListRow = memo(function RoleListRow({
     onView,
     onEdit,
     onDelete,
+    isBusy,
 }: {
     role: Role;
     permissionById: Map<string, Permission>;
     onView: (role: Role) => void;
     onEdit: (role: Role) => void;
     onDelete: (role: Role) => void;
+    isBusy: boolean;
 }) {
     const typeColor = role.is_system
         ? "border-blue-400/20 bg-blue-500/10 text-blue-200"
@@ -832,7 +897,7 @@ const RoleListRow = memo(function RoleListRow({
                     onView(role);
                 }
             }}
-            className="group grid min-w-[980px] grid-cols-[minmax(260px,2fr)_200px_130px_170px_130px_160px] items-center border-t border-white/10 px-6 py-5 text-sm transition hover:bg-white/[0.03] cursor-pointer lg:min-w-0 lg:w-full lg:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.6fr)_minmax(0,0.8fr)]"
+            className="group grid min-w-[980px] grid-cols-[minmax(260px,2fr)_200px_130px_170px_130px_190px] items-center border-t border-white/10 px-6 py-5 text-sm transition hover:bg-white/[0.03] cursor-pointer lg:min-w-0 lg:w-full lg:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.6fr)_minmax(0,1fr)]"
         >
             <div className="min-w-0 max-w-full overflow-hidden">
                 <p title={role.name} className="truncate font-semibold text-white">
@@ -872,6 +937,7 @@ const RoleListRow = memo(function RoleListRow({
                         e.stopPropagation();
                         onEdit(role);
                     }}
+                    disabled={isBusy}
                     title="Edit role"
                     aria-label="Edit role"
                     className="btn-icon btn-icon-secondary"
@@ -888,7 +954,7 @@ const RoleListRow = memo(function RoleListRow({
                             onDelete(role);
                         }
                     }}
-                    disabled={role.is_system}
+                    disabled={role.is_system || isBusy}
                     title={role.is_system ? "System roles cannot be deleted" : "Delete role"}
                     aria-label="Delete role"
                     className="btn-icon btn-icon-danger"
@@ -1204,14 +1270,18 @@ function RoleDetailModal({
     role,
     permissionById,
     onClose,
+    onDuplicate,
     onEdit,
     onDelete,
+    isBusy,
 }: {
     role: Role;
     permissionById: Map<string, Permission>;
     onClose: () => void;
+    onDuplicate: (role: Role) => Promise<void>;
     onEdit: (role: Role) => void;
     onDelete: (role: Role) => void;
+    isBusy: boolean;
 }) {
     const rolePermissions = role.permission_ids
         .map((id) => permissionById.get(id))
@@ -1287,7 +1357,16 @@ function RoleDetailModal({
                     </button>
                     <button
                         type="button"
+                        onClick={() => onDuplicate(role)}
+                        disabled={isBusy}
+                        className="btn btn-secondary"
+                    >
+                        {isBusy ? "Duplicating..." : "Duplicate as new role"}
+                    </button>
+                    <button
+                        type="button"
                         onClick={() => onEdit(role)}
+                        disabled={isBusy}
                         className="btn btn-secondary"
                     >
                         Edit role
@@ -1295,7 +1374,7 @@ function RoleDetailModal({
                     <button
                         type="button"
                         onClick={() => onDelete(role)}
-                        disabled={role.is_system}
+                        disabled={role.is_system || isBusy}
                         className="btn btn-danger"
                     >
                         Delete
