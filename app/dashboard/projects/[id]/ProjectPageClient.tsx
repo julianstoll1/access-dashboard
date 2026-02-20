@@ -188,6 +188,7 @@ export default function ProjectPageClient({
                                     permissions={permissionsState}
                                     setPermissions={setPermissionsState}
                                     projectId={project.id}
+                                    roles={roles}
                                     onHasUnsavedChangesChange={setPermissionsHasUnsavedChanges}
                                 />
 
@@ -725,6 +726,7 @@ function RolesManager({
             {deletingRole && (
                 <ConfirmDeleteRoleModal
                     role={deletingRole}
+                    permissionById={permissionById}
                     onClose={() => {
                         if (!isRoleDeleting) setDeletingRole(null);
                     }}
@@ -1387,26 +1389,63 @@ function RoleDetailModal({
 
 function ConfirmDeleteRoleModal({
     role,
+    permissionById,
     onClose,
     onConfirm,
     isDeleting,
 }: {
     role: Role;
+    permissionById: Map<string, Permission>;
     onClose: () => void;
     onConfirm: () => void;
     isDeleting: boolean;
 }) {
     const isBlocked = role.is_system;
+    const affectedPermissions = role.permission_ids
+        .map((id) => permissionById.get(id)?.name)
+        .filter(Boolean) as string[];
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
             <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0f141d] p-7">
                 <h3 className="text-xl font-semibold text-white">Delete role</h3>
-                <p className="mt-2 text-sm text-white/50">
+                <p className="mt-2 text-sm text-white/60">
                     {isBlocked
                         ? "System roles cannot be deleted."
-                        : `Are you sure you want to delete ${role.name}?`}
+                        : `You are about to delete ${role.name}. This action cannot be undone.`}
                 </p>
+                {!isBlocked && (
+                    <div className="mt-4 rounded-xl border border-white/10 bg-[#0b121c] p-4">
+                        <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/50">
+                            Impact Preview
+                        </p>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                                <p className="text-[11px] uppercase tracking-[0.12em] text-white/45">Affected users</p>
+                                <p className="mt-1 text-sm font-semibold text-white">{role.user_count}</p>
+                            </div>
+                            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                                <p className="text-[11px] uppercase tracking-[0.12em] text-white/45">Attached permissions</p>
+                                <p className="mt-1 text-sm font-semibold text-white">{affectedPermissions.length}</p>
+                            </div>
+                        </div>
+                        {affectedPermissions.length > 0 && (
+                            <div className="mt-3">
+                                <p className="mb-2 text-xs text-white/55">Permissions that will no longer be grouped by this role:</p>
+                                <div className="flex max-h-24 flex-wrap gap-2 overflow-y-auto">
+                                    {affectedPermissions.map((name, index) => (
+                                        <span
+                                            key={`${name}-${index}`}
+                                            className="inline-flex rounded-full border border-white/12 bg-white/[0.04] px-2 py-0.5 text-xs text-white/75"
+                                        >
+                                            {name}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
                 <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
                     <button onClick={onClose} disabled={isDeleting} className="btn btn-secondary">
                         Cancel
@@ -1428,11 +1467,13 @@ function PermissionsManager({
     permissions,
     setPermissions,
     projectId,
+    roles,
     onHasUnsavedChangesChange,
 }: {
     permissions: Permission[];
     setPermissions: React.Dispatch<React.SetStateAction<Permission[]>>;
     projectId: string;
+    roles: Role[];
     onHasUnsavedChangesChange: (value: boolean) => void;
 }) {
     const toast = useToast();
@@ -1508,6 +1549,18 @@ function PermissionsManager({
     const viewingPermission = useMemo(
         () => permissions.find((permission) => permission.id === viewingPermissionId) ?? null,
         [permissions, viewingPermissionId]
+    );
+    const affectedRolesForDeletingPermission = useMemo(() => {
+        if (!deletingPermission) return [];
+        return roles.filter((role) => role.permission_ids.includes(deletingPermission.id));
+    }, [roles, deletingPermission]);
+    const affectedUsersForDeletingPermission = useMemo(
+        () =>
+            affectedRolesForDeletingPermission.reduce(
+                (sum, role) => sum + (role.user_count ?? 0),
+                0
+            ),
+        [affectedRolesForDeletingPermission]
     );
 
     const handleSortChange = useCallback(
@@ -1700,6 +1753,8 @@ function PermissionsManager({
             {deletingPermission && (
                 <ConfirmDeleteModal
                     permission={deletingPermission}
+                    affectedRoles={affectedRolesForDeletingPermission}
+                    affectedUsers={affectedUsersForDeletingPermission}
                     onClose={() => {
                         if (deletingPermissionId !== deletingPermission.id) setDeletingPermission(null);
                     }}
@@ -2511,11 +2566,15 @@ function PermissionDetailModal({
 
 function ConfirmDeleteModal({
     permission,
+    affectedRoles,
+    affectedUsers,
     onClose,
     onConfirm,
     isDeleting,
 }: {
     permission: Permission;
+    affectedRoles: Role[];
+    affectedUsers: number;
     onClose: () => void;
     onConfirm: () => void;
     isDeleting: boolean;
@@ -2526,11 +2585,41 @@ function ConfirmDeleteModal({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
             <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0f141d] p-7">
                 <h3 className="text-xl font-semibold text-white">Delete permission</h3>
-                <p className="mt-2 text-sm text-white/50">
+                <p className="mt-2 text-sm text-white/60">
                     {isBlocked
                         ? "System permissions cannot be deleted."
-                        : `Are you sure you want to delete ${permission.name}?`}
+                        : `You are about to delete ${permission.name}. This action cannot be undone.`}
                 </p>
+                {!isBlocked && (
+                    <div className="mt-4 rounded-xl border border-white/10 bg-[#0b121c] p-4">
+                        <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/50">
+                            Impact Preview
+                        </p>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                                <p className="text-[11px] uppercase tracking-[0.12em] text-white/45">Affected roles</p>
+                                <p className="mt-1 text-sm font-semibold text-white">{affectedRoles.length}</p>
+                            </div>
+                            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                                <p className="text-[11px] uppercase tracking-[0.12em] text-white/45">Potential user impact</p>
+                                <p className="mt-1 text-sm font-semibold text-white">{affectedUsers}</p>
+                            </div>
+                        </div>
+                        {affectedRoles.length > 0 && (
+                            <div className="mt-3">
+                                <p className="mb-2 text-xs text-white/55">Roles currently using this permission:</p>
+                                <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-[#0a0f16] px-2 py-2">
+                                    {affectedRoles.map((role) => (
+                                        <div key={role.id} className="flex items-center justify-between gap-3 text-xs text-white/75">
+                                            <span className="truncate">{role.name}</span>
+                                            <span className="shrink-0 text-white/50">{role.user_count} users</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
                 <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
                     <button onClick={onClose} disabled={isDeleting} className="btn btn-secondary">
                         Cancel
