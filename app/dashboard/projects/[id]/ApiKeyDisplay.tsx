@@ -31,6 +31,7 @@ export function ApiKeyDisplay({
                                   lastRotatedAt,
                               }: Props) {
     const [visible, setVisible] = useState(false);
+    const [showGenerateNewKeyConfirm, setShowGenerateNewKeyConfirm] = useState(false);
     const [pending, startTransition] = useTransition();
     const toast = useToast();
 
@@ -71,38 +72,63 @@ export function ApiKeyDisplay({
                 <p>Last rotated: {rotatedFormatted}</p>
             </div>
 
-            {/* Rotate Section */}
+            {/* Generate New Key Section */}
             <div className="mt-6 rounded-md border border-red-500/20 bg-red-500/5 p-4">
                 <p className="text-xs text-red-400">
-                    Rotating will immediately invalidate the current API key.
-                    Make sure to update it in your application.
+                    Generating a new API key will immediately invalidate the current one.
+                    Make sure to update your application right away.
                 </p>
 
                 <button
-                    onClick={() => {
-                        const confirmed = confirm(
-                            "Are you sure you want to rotate this API key? This will immediately invalidate the current key."
-                        );
-
-                        if (!confirmed) return;
-
-                        startTransition(async () => {
-                            try {
-                                const formData = new FormData();
-                                formData.append("projectId", projectId);
-                                await rotateApiKey(formData);
-                                toast.success("API key rotated.");
-                            } catch (error) {
-                                toast.error(extractErrorMessage(error, "Failed to rotate API key."));
-                            }
-                        });
-                    }}
+                    onClick={() => setShowGenerateNewKeyConfirm(true)}
                     disabled={pending}
                     className="btn btn-danger-secondary mt-4"
                 >
-                    {pending ? "Rotating…" : "Rotate API key"}
+                    {pending ? "Generating…" : "Generate new API key"}
                 </button>
             </div>
+
+            {showGenerateNewKeyConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+                    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
+                        <h3 className="text-xl font-semibold text-white">Generate new API key?</h3>
+                        <p className="mt-2 text-sm text-white/60">
+                            This will immediately invalidate the current API key.
+                            Continue only if your application is ready for the new key.
+                        </p>
+                        <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
+                            <button
+                                type="button"
+                                onClick={() => setShowGenerateNewKeyConfirm(false)}
+                                disabled={pending}
+                                className="btn btn-secondary"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    startTransition(async () => {
+                                        try {
+                                            const formData = new FormData();
+                                            formData.append("projectId", projectId);
+                                            await rotateApiKey(formData);
+                                            setShowGenerateNewKeyConfirm(false);
+                                            toast.success("New API key generated.");
+                                        } catch (error) {
+                                            toast.error(extractErrorMessage(error, "Failed to generate new API key."));
+                                        }
+                                    });
+                                }}
+                                disabled={pending}
+                                className="btn btn-danger"
+                            >
+                                {pending ? "Generating..." : "Generate new API key"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </>
     );
 }

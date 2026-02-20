@@ -16,16 +16,16 @@ export function GenerateApiKeyButton({ projectId }: { projectId: string }) {
                         const formData = new FormData();
                         formData.append("projectId", projectId);
                         await generateApiKey(formData);
-                        toast.success("API key generated.");
+                        toast.success("New API key generated.");
                     } catch (error) {
-                        toast.error(extractErrorMessage(error, "Failed to generate API key."));
+                        toast.error(extractErrorMessage(error, "Failed to generate new API key."));
                     }
                 });
             }}
             disabled={pending}
             className="btn btn-primary"
         >
-            {pending ? "Generating…" : "Generate API key"}
+            {pending ? "Generating…" : "Generate new API key"}
         </button>
     );
 }

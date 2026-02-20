@@ -16,16 +16,16 @@ export function RotateApiKeyButton({ projectId }: { projectId: string }) {
                         const formData = new FormData();
                         formData.append("projectId", projectId);
                         await rotateApiKey(formData);
-                        toast.success("API key rotated.");
+                        toast.success("New API key generated.");
                     } catch (error) {
-                        toast.error(extractErrorMessage(error, "Failed to rotate API key."));
+                        toast.error(extractErrorMessage(error, "Failed to generate new API key."));
                     }
                 });
             }}
             disabled={pending}
             className="btn btn-danger-secondary"
         >
-            {pending ? "Rotating…" : "Rotate API key"}
+            {pending ? "Generating…" : "Generate new API key"}
         </button>
     );
 }
