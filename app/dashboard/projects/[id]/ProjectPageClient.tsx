@@ -1,7 +1,7 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { memo, useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ApiKeyDisplay } from "./ApiKeyDisplay";
 import { GenerateApiKeyButton } from "./GenerateApiKeyButton";
 import { BackButton } from "./BackButton";
@@ -81,8 +81,10 @@ export default function ProjectPageClient({
                                           roles: initialRoles,
                                           auditLogs,
                                           }: Props) {
+    const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
+    const [isRefreshingAudit, startRefreshingAudit] = useTransition();
     const [rolesHasUnsavedChanges, setRolesHasUnsavedChanges] = useState(false);
     const [permissionsHasUnsavedChanges, setPermissionsHasUnsavedChanges] = useState(false);
     const [pendingTabSwitch, setPendingTabSwitch] = useState<ProjectTab | null>(null);
@@ -118,7 +120,12 @@ export default function ProjectPageClient({
     const performTabSelect = useCallback((tab: ProjectTab) => {
         setActiveTab(tab);
         setTabInUrl(tab);
-    }, [setTabInUrl]);
+        if (tab === "audit") {
+            startRefreshingAudit(() => {
+                router.refresh();
+            });
+        }
+    }, [router, setTabInUrl]);
 
     const usageMonth = 24193;
     const usageLimit = 100000;
@@ -228,6 +235,11 @@ export default function ProjectPageClient({
 
                         {activeTab === "audit" && (
                             <Section title="Audit Log">
+                                {isRefreshingAudit && (
+                                    <p className="mb-4 text-xs uppercase tracking-[0.12em] text-white/45">
+                                        Refreshing logs...
+                                    </p>
+                                )}
                                 <AuditLogTimeline logs={auditLogs} />
                             </Section>
                         )}
