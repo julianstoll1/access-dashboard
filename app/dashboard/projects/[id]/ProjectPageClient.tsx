@@ -273,12 +273,16 @@ export default function ProjectPageClient({
 /* ================= COMPONENTS ================= */
 
 import {
+    bulkDeletePermissionsAction,
+    bulkTogglePermissionsAction,
     createPermissionAction as createPermissionActionRaw,
     updatePermissionAction as updatePermissionActionRaw,
     deletePermissionAction,
     togglePermissionAction,
 } from "./permissions-actions";
 import {
+    bulkAssignRolePermissionsAction,
+    bulkDeleteRolesAction,
     createRoleAction as createRoleActionRaw,
     updateRoleAction as updateRoleActionRaw,
     deleteRoleAction,
@@ -504,9 +508,13 @@ function RolesManager({
     const [deletingRole, setDeletingRole] = useState<Role | null>(null);
     const [isRoleSaving, setIsRoleSaving] = useState(false);
     const [isRoleDeleting, setIsRoleDeleting] = useState(false);
+    const [isBulkRoleSaving, setIsBulkRoleSaving] = useState(false);
     const [createFormDirty, setCreateFormDirty] = useState(false);
     const [editFormDirty, setEditFormDirty] = useState(false);
     const [viewingRoleId, setViewingRoleId] = useState<string | null>(null);
+    const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
+    const [isBulkAssignOpen, setIsBulkAssignOpen] = useState(false);
+    const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
     const hasUnsavedChanges = createFormDirty || editFormDirty;
 
     useEffect(() => {
@@ -565,6 +573,28 @@ function RolesManager({
         () => roles.find((role) => role.id === viewingRoleId) ?? null,
         [roles, viewingRoleId]
     );
+    const selectedRoles = useMemo(
+        () => roles.filter((role) => selectedRoleIds.includes(role.id)),
+        [roles, selectedRoleIds]
+    );
+    const selectedRoleCount = selectedRoles.length;
+    const selectedRoleCountLabel = selectedRoleCount === 1 ? "role" : "roles";
+    const selectedRoleIdsSet = useMemo(() => new Set(selectedRoleIds), [selectedRoleIds]);
+    const allVisibleRoleIds = useMemo(() => sortedRoles.map((role) => role.id), [sortedRoles]);
+    const allVisibleRolesSelected = useMemo(
+        () =>
+            allVisibleRoleIds.length > 0 &&
+            allVisibleRoleIds.every((id) => selectedRoleIdsSet.has(id)),
+        [allVisibleRoleIds, selectedRoleIdsSet]
+    );
+    const canBulkDeleteRoles = useMemo(
+        () => selectedRoles.some((role) => !role.is_system),
+        [selectedRoles]
+    );
+
+    useEffect(() => {
+        setSelectedRoleIds((prev) => prev.filter((id) => roles.some((role) => role.id === id)));
+    }, [roles]);
 
     const handleSortChange = useCallback(
         (value: RoleSortKey) => {
@@ -686,6 +716,100 @@ function RolesManager({
         [projectId, roles, setRoles, toast]
     );
 
+    const handleToggleRoleSelection = useCallback((roleId: string) => {
+        setSelectedRoleIds((prev) =>
+            prev.includes(roleId) ? prev.filter((id) => id !== roleId) : [...prev, roleId]
+        );
+    }, []);
+
+    const handleToggleSelectAllVisibleRoles = useCallback(() => {
+        setSelectedRoleIds((prev) => {
+            if (allVisibleRoleIds.length === 0) return prev;
+            const prevSet = new Set(prev);
+            const isAllSelected = allVisibleRoleIds.every((id) => prevSet.has(id));
+            if (isAllSelected) {
+                return prev.filter((id) => !allVisibleRoleIds.includes(id));
+            }
+            const next = [...prev];
+            for (const id of allVisibleRoleIds) {
+                if (!prevSet.has(id)) next.push(id);
+            }
+            return next;
+        });
+    }, [allVisibleRoleIds]);
+
+    const handleClearRoleSelection = useCallback(() => {
+        setSelectedRoleIds([]);
+    }, []);
+
+    const handleBulkDeleteRoles = useCallback(async () => {
+        if (selectedRoleIds.length === 0) return;
+        setIsBulkRoleSaving(true);
+        try {
+            const result = await bulkDeleteRolesAction(projectId, selectedRoleIds);
+            if (!result.ok) {
+                toast.error(result.error || "Failed to delete selected roles.");
+                return;
+            }
+            const { deletedIds, skippedSystemIds, failedIds } = result.data;
+            if (deletedIds.length > 0) {
+                setRoles((prev) => prev.filter((role) => !deletedIds.includes(role.id)));
+            }
+            setSelectedRoleIds((prev) => prev.filter((id) => !deletedIds.includes(id)));
+            setIsBulkDeleteOpen(false);
+
+            if (deletedIds.length > 0) {
+                toast.success(`${deletedIds.length} ${deletedIds.length === 1 ? "role" : "roles"} deleted.`);
+            }
+            if (skippedSystemIds.length > 0) {
+                toast.error(`${skippedSystemIds.length} system ${skippedSystemIds.length === 1 ? "role was" : "roles were"} skipped.`);
+            }
+            if (failedIds.length > 0) {
+                toast.error(`${failedIds.length} ${failedIds.length === 1 ? "role" : "roles"} could not be deleted.`);
+            }
+        } finally {
+            setIsBulkRoleSaving(false);
+        }
+    }, [projectId, selectedRoleIds, setRoles, toast]);
+
+    const handleBulkAssignPermissions = useCallback(
+        async (permissionIds: string[], mode: "add" | "remove" | "replace") => {
+            if (selectedRoleIds.length === 0) return;
+            setIsBulkRoleSaving(true);
+            try {
+                const result = await bulkAssignRolePermissionsAction(
+                    projectId,
+                    selectedRoleIds,
+                    permissionIds,
+                    mode
+                );
+                if (!result.ok) {
+                    toast.error(result.error || "Failed to assign permissions.");
+                    return result;
+                }
+
+                const updatedMap = result.data.updatedRolePermissions;
+                setRoles((prev) =>
+                    prev.map((role) =>
+                        updatedMap[role.id]
+                            ? normalizeRole({
+                                ...role,
+                                permission_ids: updatedMap[role.id],
+                                updated_at: new Date().toISOString(),
+                            })
+                            : role
+                    )
+                );
+                setIsBulkAssignOpen(false);
+                toast.success("Role permissions updated.");
+                return result;
+            } finally {
+                setIsBulkRoleSaving(false);
+            }
+        },
+        [projectId, selectedRoleIds, setRoles, toast]
+    );
+
     return (
         <>
             <RoleFilterBar
@@ -704,8 +828,24 @@ function RolesManager({
                 onView={(role) => setViewingRoleId(role.id)}
                 onEdit={(role) => setEditingRole(role)}
                 onDelete={(role) => setDeletingRole(role)}
-                isBusy={isRoleSaving}
+                isBusy={isRoleSaving || isBulkRoleSaving}
+                selectedRoleIds={selectedRoleIdsSet}
+                onToggleRoleSelection={handleToggleRoleSelection}
+                onToggleSelectAllVisibleRoles={handleToggleSelectAllVisibleRoles}
+                allVisibleRolesSelected={allVisibleRolesSelected}
             />
+
+            {selectedRoleCount > 0 && (
+                <BulkRoleActionsBar
+                    selectedCount={selectedRoleCount}
+                    selectedCountLabel={selectedRoleCountLabel}
+                    onClearSelection={handleClearRoleSelection}
+                    onOpenAssignModal={() => setIsBulkAssignOpen(true)}
+                    onOpenDeleteModal={() => setIsBulkDeleteOpen(true)}
+                    canDelete={canBulkDeleteRoles}
+                    isBusy={isBulkRoleSaving}
+                />
+            )}
 
             {isCreateOpen && (
                 <RoleEditorModal
@@ -769,6 +909,31 @@ function RolesManager({
                     }}
                     onConfirm={handleDelete}
                     isDeleting={isRoleDeleting}
+                />
+            )}
+
+            {isBulkAssignOpen && (
+                <BulkAssignPermissionsModal
+                    selectedCount={selectedRoleCount}
+                    permissions={availablePermissions}
+                    roles={selectedRoles}
+                    onClose={() => {
+                        if (!isBulkRoleSaving) setIsBulkAssignOpen(false);
+                    }}
+                    onSubmit={handleBulkAssignPermissions}
+                    isSaving={isBulkRoleSaving}
+                />
+            )}
+
+            {isBulkDeleteOpen && (
+                <BulkDeleteRolesModal
+                    roles={selectedRoles}
+                    permissionById={permissionById}
+                    onClose={() => {
+                        if (!isBulkRoleSaving) setIsBulkDeleteOpen(false);
+                    }}
+                    onConfirm={handleBulkDeleteRoles}
+                    isDeleting={isBulkRoleSaving}
                 />
             )}
         </>
@@ -858,6 +1023,10 @@ function RolesTable({
     onEdit,
     onDelete,
     isBusy,
+    selectedRoleIds,
+    onToggleRoleSelection,
+    onToggleSelectAllVisibleRoles,
+    allVisibleRolesSelected,
 }: {
     roles: Role[];
     permissionById: Map<string, Permission>;
@@ -865,11 +1034,24 @@ function RolesTable({
     onEdit: (role: Role) => void;
     onDelete: (role: Role) => void;
     isBusy: boolean;
+    selectedRoleIds: Set<string>;
+    onToggleRoleSelection: (roleId: string) => void;
+    onToggleSelectAllVisibleRoles: () => void;
+    allVisibleRolesSelected: boolean;
 }) {
     return (
         <div className="mt-6 w-full min-w-0 max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-[#0f141d] shadow-[0_20px_45px_-30px_rgba(0,0,0,0.9)] lg:overflow-x-hidden">
             <div className="min-w-[980px] max-w-full lg:min-w-0 lg:w-full">
-                <div className="grid grid-cols-[minmax(260px,2fr)_200px_130px_170px_130px_190px] border-b border-white/10 bg-[#111827] px-6 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white/45 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.6fr)_minmax(0,1fr)]">
+                <div className="grid grid-cols-[48px_minmax(260px,2fr)_200px_130px_170px_130px_190px] border-b border-white/10 bg-[#111827] px-6 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white/45 lg:grid-cols-[48px_minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.6fr)_minmax(0,1fr)]">
+                    <label className="flex items-center justify-center">
+                        <input
+                            type="checkbox"
+                            checked={allVisibleRolesSelected}
+                            onChange={onToggleSelectAllVisibleRoles}
+                            className="h-4 w-4 rounded border-white/20 bg-[#0a0f16] text-white focus:ring-white/20"
+                            aria-label="Select all visible roles"
+                        />
+                    </label>
                     <span className="whitespace-nowrap">Role</span>
                     <span className="whitespace-nowrap">Slug</span>
                     <span className="whitespace-nowrap">Type</span>
@@ -887,6 +1069,8 @@ function RolesTable({
                         onEdit={onEdit}
                         onDelete={onDelete}
                         isBusy={isBusy}
+                        isSelected={selectedRoleIds.has(role.id)}
+                        onToggleSelection={onToggleRoleSelection}
                     />
                 ))}
 
@@ -907,6 +1091,8 @@ const RoleListRow = memo(function RoleListRow({
     onEdit,
     onDelete,
     isBusy,
+    isSelected,
+    onToggleSelection,
 }: {
     role: Role;
     permissionById: Map<string, Permission>;
@@ -914,6 +1100,8 @@ const RoleListRow = memo(function RoleListRow({
     onEdit: (role: Role) => void;
     onDelete: (role: Role) => void;
     isBusy: boolean;
+    isSelected: boolean;
+    onToggleSelection: (roleId: string) => void;
 }) {
     const typeColor = role.is_system
         ? "border-blue-400/20 bg-blue-500/10 text-blue-200"
@@ -936,8 +1124,21 @@ const RoleListRow = memo(function RoleListRow({
                     onView(role);
                 }
             }}
-            className="group grid min-w-[980px] grid-cols-[minmax(260px,2fr)_200px_130px_170px_130px_190px] items-center border-t border-white/10 px-6 py-5 text-sm transition hover:bg-white/[0.03] cursor-pointer lg:min-w-0 lg:w-full lg:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.6fr)_minmax(0,1fr)]"
+            className="group grid min-w-[980px] grid-cols-[48px_minmax(260px,2fr)_200px_130px_170px_130px_190px] items-center border-t border-white/10 px-6 py-5 text-sm transition hover:bg-white/[0.03] cursor-pointer lg:min-w-0 lg:w-full lg:grid-cols-[48px_minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.6fr)_minmax(0,1fr)]"
         >
+            <label
+                className="flex items-center justify-center"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+            >
+                <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => onToggleSelection(role.id)}
+                    className="h-4 w-4 rounded border-white/20 bg-[#0a0f16] text-white focus:ring-white/20"
+                    aria-label={`Select role ${role.name}`}
+                />
+            </label>
             <div className="min-w-0 max-w-full overflow-hidden">
                 <p title={role.name} className="truncate font-semibold text-white">
                     {role.name}
@@ -1008,6 +1209,277 @@ const RoleListRow = memo(function RoleListRow({
         </div>
     );
 });
+
+function BulkRoleActionsBar({
+    selectedCount,
+    selectedCountLabel,
+    onClearSelection,
+    onOpenAssignModal,
+    onOpenDeleteModal,
+    canDelete,
+    isBusy,
+}: {
+    selectedCount: number;
+    selectedCountLabel: string;
+    onClearSelection: () => void;
+    onOpenAssignModal: () => void;
+    onOpenDeleteModal: () => void;
+    canDelete: boolean;
+    isBusy: boolean;
+}) {
+    return (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#0b121c] px-4 py-3">
+            <p className="text-sm text-white/75">
+                {selectedCount} {selectedCountLabel} selected
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={onClearSelection} disabled={isBusy} className="btn btn-secondary">
+                    Clear selection
+                </button>
+                <button type="button" onClick={onOpenAssignModal} disabled={isBusy} className="btn btn-secondary">
+                    Assign permissions
+                </button>
+                <button
+                    type="button"
+                    onClick={onOpenDeleteModal}
+                    disabled={!canDelete || isBusy}
+                    className="btn btn-danger"
+                >
+                    Delete selected
+                </button>
+            </div>
+        </div>
+    );
+}
+
+function BulkAssignPermissionsModal({
+    selectedCount,
+    permissions,
+    roles,
+    onClose,
+    onSubmit,
+    isSaving,
+}: {
+    selectedCount: number;
+    permissions: Permission[];
+    roles: Role[];
+    onClose: () => void;
+    onSubmit: (permissionIds: string[], mode: "add" | "remove" | "replace") => Promise<unknown>;
+    isSaving: boolean;
+}) {
+    const [mode, setMode] = useState<"add" | "remove" | "replace">("add");
+    const [search, setSearch] = useState("");
+    const [selectedPermissionIds, setSelectedPermissionIds] = useState<string[]>([]);
+
+    const filteredPermissions = useMemo(() => {
+        const normalized = search.trim().toLowerCase();
+        if (!normalized) return permissions;
+        return permissions.filter(
+            (permission) =>
+                permission.name.toLowerCase().includes(normalized) ||
+                permission.slug.toLowerCase().includes(normalized)
+        );
+    }, [permissions, search]);
+
+    const allVisibleIds = useMemo(
+        () => filteredPermissions.map((permission) => permission.id),
+        [filteredPermissions]
+    );
+    const allVisibleSelected = useMemo(
+        () => allVisibleIds.length > 0 && allVisibleIds.every((id) => selectedPermissionIds.includes(id)),
+        [allVisibleIds, selectedPermissionIds]
+    );
+
+    const togglePermission = (permissionId: string) => {
+        setSelectedPermissionIds((prev) =>
+            prev.includes(permissionId)
+                ? prev.filter((id) => id !== permissionId)
+                : [...prev, permissionId]
+        );
+    };
+
+    const toggleSelectAllVisible = () => {
+        setSelectedPermissionIds((prev) => {
+            const prevSet = new Set(prev);
+            const everySelected = allVisibleIds.every((id) => prevSet.has(id));
+            if (everySelected) {
+                return prev.filter((id) => !allVisibleIds.includes(id));
+            }
+            const next = [...prev];
+            for (const id of allVisibleIds) {
+                if (!prevSet.has(id)) next.push(id);
+            }
+            return next;
+        });
+    };
+
+    const canSubmit = mode === "replace" || selectedPermissionIds.length > 0;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
+                <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-5">
+                    <div>
+                        <h3 className="text-xl font-semibold text-white">Bulk role permissions</h3>
+                        <p className="mt-1 text-sm text-white/45">
+                            Update permissions for {selectedCount} selected {selectedCount === 1 ? "role" : "roles"}.
+                        </p>
+                    </div>
+                    <button onClick={onClose} disabled={isSaving} className="btn btn-secondary text-xs px-3 py-1.5">
+                        Close
+                    </button>
+                </div>
+
+                <div className="mt-5 grid gap-4 sm:grid-cols-3">
+                    <label className="flex flex-col gap-2">
+                        <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/45">Mode</span>
+                        <select
+                            value={mode}
+                            onChange={(e) => setMode(e.target.value as "add" | "remove" | "replace")}
+                            className="h-11 rounded-xl border border-white/10 bg-[#0a0f16] px-3 text-sm text-white/85 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        >
+                            <option value="add">Add selected permissions</option>
+                            <option value="remove">Remove selected permissions</option>
+                            <option value="replace">Replace all permissions</option>
+                        </select>
+                    </label>
+                    <label className="sm:col-span-2 flex flex-col gap-2">
+                        <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/45">Search</span>
+                        <input
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            placeholder="Filter permissions by name or slug"
+                            className="h-11 rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm text-white placeholder:text-white/35 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        />
+                    </label>
+                </div>
+
+                <div className="mt-4 flex items-center justify-between text-xs text-white/50">
+                    <span>{selectedPermissionIds.length} permissions selected</span>
+                    <button type="button" onClick={toggleSelectAllVisible} className="text-white/70 hover:text-white">
+                        {allVisibleSelected ? "Clear visible" : "Select visible"}
+                    </button>
+                </div>
+
+                <div className="mt-3 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-white/10 bg-[#0a0f16] p-3">
+                    {filteredPermissions.map((permission) => {
+                        const checked = selectedPermissionIds.includes(permission.id);
+                        return (
+                            <label
+                                key={permission.id}
+                                className="flex cursor-pointer items-start gap-3 rounded-lg border border-white/8 bg-white/[0.015] px-3 py-2.5 transition hover:border-white/20"
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => togglePermission(permission.id)}
+                                    disabled={isSaving}
+                                    className="mt-0.5 h-4 w-4 rounded border-white/20 bg-[#0a0f16] text-white focus:ring-white/20"
+                                />
+                                <div className="min-w-0">
+                                    <p className="truncate text-sm font-medium text-white">{permission.name}</p>
+                                    <p className="truncate font-mono text-xs text-white/45">{permission.slug}</p>
+                                </div>
+                            </label>
+                        );
+                    })}
+                    {filteredPermissions.length === 0 && (
+                        <p className="px-1 py-4 text-center text-xs text-white/45">No permissions found</p>
+                    )}
+                </div>
+
+                <div className="mt-5 rounded-xl border border-white/10 bg-[#0b121c] p-3">
+                    <p className="text-[11px] uppercase tracking-[0.12em] text-white/45">Affected roles</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                        {roles.map((role) => (
+                            <span
+                                key={role.id}
+                                className="inline-flex rounded-full border border-white/12 bg-white/[0.04] px-2 py-0.5 text-xs text-white/75"
+                            >
+                                {role.name}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
+                    <button onClick={onClose} disabled={isSaving} className="btn btn-secondary">
+                        Cancel
+                    </button>
+                    <button
+                        onClick={() => onSubmit(selectedPermissionIds, mode)}
+                        disabled={!canSubmit || isSaving}
+                        className="btn btn-primary"
+                    >
+                        {isSaving ? "Saving..." : "Apply changes"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function BulkDeleteRolesModal({
+    roles,
+    permissionById,
+    onClose,
+    onConfirm,
+    isDeleting,
+}: {
+    roles: Role[];
+    permissionById: Map<string, Permission>;
+    onClose: () => void;
+    onConfirm: () => void;
+    isDeleting: boolean;
+}) {
+    const deletableRoles = roles.filter((role) => !role.is_system);
+    const systemRoles = roles.filter((role) => role.is_system);
+    const affectedUsers = deletableRoles.reduce((sum, role) => sum + (role.user_count ?? 0), 0);
+    const permissionCount = deletableRoles.reduce((sum, role) => {
+        const unique = new Set(role.permission_ids.filter((id) => permissionById.has(id)));
+        return sum + unique.size;
+    }, 0);
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#0f141d] p-7">
+                <h3 className="text-xl font-semibold text-white">Delete selected roles</h3>
+                <p className="mt-2 text-sm text-white/60">
+                    This will permanently delete {deletableRoles.length} selected {deletableRoles.length === 1 ? "role" : "roles"}.
+                </p>
+                <div className="mt-4 rounded-xl border border-white/10 bg-[#0b121c] p-4">
+                    <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                            <p className="text-[11px] uppercase tracking-[0.12em] text-white/45">Affected users</p>
+                            <p className="mt-1 text-sm font-semibold text-white">{affectedUsers}</p>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                            <p className="text-[11px] uppercase tracking-[0.12em] text-white/45">Permissions impacted</p>
+                            <p className="mt-1 text-sm font-semibold text-white">{permissionCount}</p>
+                        </div>
+                    </div>
+                    {systemRoles.length > 0 && (
+                        <p className="mt-3 text-xs text-white/55">
+                            {systemRoles.length} system {systemRoles.length === 1 ? "role is" : "roles are"} selected and will be skipped.
+                        </p>
+                    )}
+                </div>
+                <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
+                    <button onClick={onClose} disabled={isDeleting} className="btn btn-secondary">
+                        Cancel
+                    </button>
+                    <button
+                        onClick={onConfirm}
+                        disabled={deletableRoles.length === 0 || isDeleting}
+                        className="btn btn-danger"
+                    >
+                        {isDeleting ? "Deleting..." : "Delete selected"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 function RoleEditorModal({
     mode,
@@ -1525,9 +1997,12 @@ function PermissionsManager({
     const [savingPermissionMode, setSavingPermissionMode] = useState<"create" | "edit" | null>(null);
     const [deletingPermissionId, setDeletingPermissionId] = useState<string | null>(null);
     const [togglingPermissionId, setTogglingPermissionId] = useState<string | null>(null);
+    const [isBulkPermissionSaving, setIsBulkPermissionSaving] = useState(false);
     const [createFormDirty, setCreateFormDirty] = useState(false);
     const [editFormDirty, setEditFormDirty] = useState(false);
     const [viewingPermissionId, setViewingPermissionId] = useState<string | null>(null);
+    const [selectedPermissionIds, setSelectedPermissionIds] = useState<string[]>([]);
+    const [isBulkDeletePermissionsOpen, setIsBulkDeletePermissionsOpen] = useState(false);
     const hasUnsavedChanges = createFormDirty || editFormDirty;
 
     useEffect(() => {
@@ -1586,6 +2061,30 @@ function PermissionsManager({
     const viewingPermission = useMemo(
         () => permissions.find((permission) => permission.id === viewingPermissionId) ?? null,
         [permissions, viewingPermissionId]
+    );
+    const selectedPermissions = useMemo(
+        () => permissions.filter((permission) => selectedPermissionIds.includes(permission.id)),
+        [permissions, selectedPermissionIds]
+    );
+    const selectedPermissionCount = selectedPermissions.length;
+    const selectedPermissionCountLabel = selectedPermissionCount === 1 ? "permission" : "permissions";
+    const selectedPermissionIdsSet = useMemo(
+        () => new Set(selectedPermissionIds),
+        [selectedPermissionIds]
+    );
+    const allVisiblePermissionIds = useMemo(
+        () => sortedPermissions.map((permission) => permission.id),
+        [sortedPermissions]
+    );
+    const allVisiblePermissionsSelected = useMemo(
+        () =>
+            allVisiblePermissionIds.length > 0 &&
+            allVisiblePermissionIds.every((id) => selectedPermissionIdsSet.has(id)),
+        [allVisiblePermissionIds, selectedPermissionIdsSet]
+    );
+    const canBulkDeletePermissions = useMemo(
+        () => selectedPermissions.some((permission) => !permission.is_system),
+        [selectedPermissions]
     );
     const affectedRolesForDeletingPermission = useMemo(() => {
         if (!deletingPermission) return [];
@@ -1724,6 +2223,104 @@ function PermissionsManager({
         }
     }, [projectId, deletingPermission, viewingPermissionId, setPermissions, toast]);
 
+    useEffect(() => {
+        setSelectedPermissionIds((prev) =>
+            prev.filter((id) => permissions.some((permission) => permission.id === id))
+        );
+    }, [permissions]);
+
+    const handleTogglePermissionSelection = useCallback((permissionId: string) => {
+        setSelectedPermissionIds((prev) =>
+            prev.includes(permissionId)
+                ? prev.filter((id) => id !== permissionId)
+                : [...prev, permissionId]
+        );
+    }, []);
+
+    const handleToggleSelectAllVisiblePermissions = useCallback(() => {
+        setSelectedPermissionIds((prev) => {
+            if (allVisiblePermissionIds.length === 0) return prev;
+            const prevSet = new Set(prev);
+            const isAllSelected = allVisiblePermissionIds.every((id) => prevSet.has(id));
+            if (isAllSelected) {
+                return prev.filter((id) => !allVisiblePermissionIds.includes(id));
+            }
+            const next = [...prev];
+            for (const id of allVisiblePermissionIds) {
+                if (!prevSet.has(id)) next.push(id);
+            }
+            return next;
+        });
+    }, [allVisiblePermissionIds]);
+
+    const handleClearPermissionSelection = useCallback(() => {
+        setSelectedPermissionIds([]);
+    }, []);
+
+    const handleBulkTogglePermissions = useCallback(
+        async (enabled: boolean) => {
+            if (selectedPermissionIds.length === 0) return;
+            setIsBulkPermissionSaving(true);
+            try {
+                const result = await bulkTogglePermissionsAction(projectId, selectedPermissionIds, enabled);
+                if (!result.ok) {
+                    toast.error(result.error || "Failed to update selected permissions.");
+                    return;
+                }
+                const updatedById = new Map(result.data.map((permission) => [permission.id, permission]));
+                setPermissions((prev) =>
+                    prev.map((permission) =>
+                        updatedById.has(permission.id)
+                            ? normalizePermission(updatedById.get(permission.id) as PermissionInput)
+                            : permission
+                    )
+                );
+                toast.success(
+                    `${result.data.length} ${result.data.length === 1 ? "permission" : "permissions"} ${enabled ? "enabled" : "disabled"}.`
+                );
+            } finally {
+                setIsBulkPermissionSaving(false);
+            }
+        },
+        [projectId, selectedPermissionIds, setPermissions, toast]
+    );
+
+    const handleBulkDeletePermissions = useCallback(async () => {
+        if (selectedPermissionIds.length === 0) return;
+        setIsBulkPermissionSaving(true);
+        try {
+            const result = await bulkDeletePermissionsAction(projectId, selectedPermissionIds);
+            if (!result.ok) {
+                toast.error(result.error || "Failed to delete selected permissions.");
+                return;
+            }
+            const { deletedIds, skippedSystemIds, failedIds } = result.data;
+            if (deletedIds.length > 0) {
+                setPermissions((prev) => prev.filter((permission) => !deletedIds.includes(permission.id)));
+            }
+            setSelectedPermissionIds((prev) => prev.filter((id) => !deletedIds.includes(id)));
+            setIsBulkDeletePermissionsOpen(false);
+
+            if (deletedIds.length > 0) {
+                toast.success(
+                    `${deletedIds.length} ${deletedIds.length === 1 ? "permission" : "permissions"} deleted.`
+                );
+            }
+            if (skippedSystemIds.length > 0) {
+                toast.error(
+                    `${skippedSystemIds.length} system ${skippedSystemIds.length === 1 ? "permission was" : "permissions were"} skipped.`
+                );
+            }
+            if (failedIds.length > 0) {
+                toast.error(
+                    `${failedIds.length} ${failedIds.length === 1 ? "permission" : "permissions"} could not be deleted.`
+                );
+            }
+        } finally {
+            setIsBulkPermissionSaving(false);
+        }
+    }, [projectId, selectedPermissionIds, setPermissions, toast]);
+
     return (
         <>
             <FilterBar
@@ -1745,7 +2342,25 @@ function PermissionsManager({
                 togglingPermissionId={togglingPermissionId}
                 onEdit={(permission) => setEditingPermission(permission)}
                 onDelete={(permission) => setDeletingPermission(permission)}
+                selectedPermissionIds={selectedPermissionIdsSet}
+                onTogglePermissionSelection={handleTogglePermissionSelection}
+                onToggleSelectAllVisiblePermissions={handleToggleSelectAllVisiblePermissions}
+                allVisiblePermissionsSelected={allVisiblePermissionsSelected}
+                isBulkBusy={isBulkPermissionSaving}
             />
+
+            {selectedPermissionCount > 0 && (
+                <BulkPermissionActionsBar
+                    selectedCount={selectedPermissionCount}
+                    selectedCountLabel={selectedPermissionCountLabel}
+                    onClearSelection={handleClearPermissionSelection}
+                    onBulkEnable={() => handleBulkTogglePermissions(true)}
+                    onBulkDisable={() => handleBulkTogglePermissions(false)}
+                    onBulkDelete={() => setIsBulkDeletePermissionsOpen(true)}
+                    canDelete={canBulkDeletePermissions}
+                    isBusy={isBulkPermissionSaving}
+                />
+            )}
 
             {isCreateOpen && (
                 <CreatePermissionModal
@@ -1797,6 +2412,18 @@ function PermissionsManager({
                     }}
                     onConfirm={handleDelete}
                     isDeleting={deletingPermissionId === deletingPermission.id}
+                />
+            )}
+
+            {isBulkDeletePermissionsOpen && (
+                <BulkDeletePermissionsModal
+                    permissions={selectedPermissions}
+                    roles={roles}
+                    onClose={() => {
+                        if (!isBulkPermissionSaving) setIsBulkDeletePermissionsOpen(false);
+                    }}
+                    onConfirm={handleBulkDeletePermissions}
+                    isDeleting={isBulkPermissionSaving}
                 />
             )}
         </>
@@ -1907,6 +2534,11 @@ function PermissionsTable({
     togglingPermissionId,
     onEdit,
     onDelete,
+    selectedPermissionIds,
+    onTogglePermissionSelection,
+    onToggleSelectAllVisiblePermissions,
+    allVisiblePermissionsSelected,
+    isBulkBusy,
 }: {
     permissions: Permission[];
     onView: (permission: Permission) => void;
@@ -1914,11 +2546,26 @@ function PermissionsTable({
     togglingPermissionId: string | null;
     onEdit: (permission: Permission) => void;
     onDelete: (permission: Permission) => void;
+    selectedPermissionIds: Set<string>;
+    onTogglePermissionSelection: (permissionId: string) => void;
+    onToggleSelectAllVisiblePermissions: () => void;
+    allVisiblePermissionsSelected: boolean;
+    isBulkBusy: boolean;
 }) {
     return (
         <div className="mt-6 w-full min-w-0 max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-[#0f141d] shadow-[0_20px_45px_-30px_rgba(0,0,0,0.9)] lg:overflow-x-hidden">
             <div className="min-w-[920px] max-w-full lg:min-w-0 lg:w-full">
-                <div className="grid grid-cols-[minmax(340px,2.4fr)_200px_130px_130px_150px_170px] border-b border-white/10 bg-[#111827] px-6 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white/45 lg:grid-cols-[minmax(0,2.4fr)_minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.9fr)_minmax(0,1fr)]">
+                <div className="grid grid-cols-[48px_minmax(340px,2.4fr)_200px_130px_130px_150px_170px] border-b border-white/10 bg-[#111827] px-6 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white/45 lg:grid-cols-[48px_minmax(0,2.4fr)_minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.9fr)_minmax(0,1fr)]">
+                    <label className="flex items-center justify-center">
+                        <input
+                            type="checkbox"
+                            checked={allVisiblePermissionsSelected}
+                            onChange={onToggleSelectAllVisiblePermissions}
+                            disabled={isBulkBusy}
+                            className="h-4 w-4 rounded border-white/20 bg-[#0a0f16] text-white focus:ring-white/20"
+                            aria-label="Select all visible permissions"
+                        />
+                    </label>
                     <span className="whitespace-nowrap">Name</span>
                     <span className="whitespace-nowrap">Status</span>
                     <span className="whitespace-nowrap">Risk</span>
@@ -1936,6 +2583,9 @@ function PermissionsTable({
                         isToggling={togglingPermissionId === permission.id}
                         onEdit={onEdit}
                         onDelete={onDelete}
+                        isSelected={selectedPermissionIds.has(permission.id)}
+                        onToggleSelection={onTogglePermissionSelection}
+                        isBulkBusy={isBulkBusy}
                     />
                 ))}
 
@@ -1956,6 +2606,9 @@ const PermissionRow = memo(function PermissionRow({
     isToggling,
     onEdit,
     onDelete,
+    isSelected,
+    onToggleSelection,
+    isBulkBusy,
 }: {
     permission: Permission;
     onView: (permission: Permission) => void;
@@ -1963,6 +2616,9 @@ const PermissionRow = memo(function PermissionRow({
     isToggling: boolean;
     onEdit: (permission: Permission) => void;
     onDelete: (permission: Permission) => void;
+    isSelected: boolean;
+    onToggleSelection: (permissionId: string) => void;
+    isBulkBusy: boolean;
 }) {
     const [copied, setCopied] = useState(false);
 
@@ -1997,8 +2653,22 @@ const PermissionRow = memo(function PermissionRow({
                     onView(permission);
                 }
             }}
-            className="group grid min-w-[920px] grid-cols-[minmax(340px,2.4fr)_200px_130px_130px_150px_170px] items-center border-t border-white/10 px-6 py-5 text-sm transition hover:bg-white/[0.03] cursor-pointer lg:min-w-0 lg:w-full lg:grid-cols-[minmax(0,2.4fr)_minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.9fr)_minmax(0,1fr)]"
+            className="group grid min-w-[920px] grid-cols-[48px_minmax(340px,2.4fr)_200px_130px_130px_150px_170px] items-center border-t border-white/10 px-6 py-5 text-sm transition hover:bg-white/[0.03] cursor-pointer lg:min-w-0 lg:w-full lg:grid-cols-[48px_minmax(0,2.4fr)_minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.9fr)_minmax(0,1fr)]"
         >
+            <label
+                className="flex items-center justify-center"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+            >
+                <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => onToggleSelection(permission.id)}
+                    disabled={isBulkBusy}
+                    className="h-4 w-4 rounded border-white/20 bg-[#0a0f16] text-white focus:ring-white/20"
+                    aria-label={`Select permission ${permission.name}`}
+                />
+            </label>
             <div className="min-w-0 max-w-full overflow-hidden">
                 <p title={permission.name} className="truncate font-semibold text-white">
                     {permission.name}
@@ -2023,7 +2693,7 @@ const PermissionRow = memo(function PermissionRow({
                         e.stopPropagation();
                         onToggle(permission);
                     }}
-                    disabled={isToggling}
+                    disabled={isToggling || isBulkBusy}
                     title={permission.enabled ? "Disable permission" : "Enable permission"}
                     aria-label={permission.enabled ? "Disable permission" : "Enable permission"}
                     className={`relative h-6 w-11 rounded-full border transition ${
@@ -2072,6 +2742,7 @@ const PermissionRow = memo(function PermissionRow({
                         e.stopPropagation();
                         onEdit(permission);
                     }}
+                    disabled={isBulkBusy}
                     title="Edit permission"
                     aria-label="Edit permission"
                     className="btn-icon btn-icon-secondary"
@@ -2088,7 +2759,7 @@ const PermissionRow = memo(function PermissionRow({
                             onDelete(permission);
                         }
                     }}
-                    disabled={permission.is_system}
+                    disabled={permission.is_system || isBulkBusy}
                     title={permission.is_system ? "System permissions cannot be deleted" : "Delete permission"}
                     aria-label="Delete permission"
                     className="btn-icon btn-icon-danger"
@@ -2103,6 +2774,115 @@ const PermissionRow = memo(function PermissionRow({
         </div>
     );
 });
+
+function BulkPermissionActionsBar({
+    selectedCount,
+    selectedCountLabel,
+    onClearSelection,
+    onBulkEnable,
+    onBulkDisable,
+    onBulkDelete,
+    canDelete,
+    isBusy,
+}: {
+    selectedCount: number;
+    selectedCountLabel: string;
+    onClearSelection: () => void;
+    onBulkEnable: () => void;
+    onBulkDisable: () => void;
+    onBulkDelete: () => void;
+    canDelete: boolean;
+    isBusy: boolean;
+}) {
+    return (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#0b121c] px-4 py-3">
+            <p className="text-sm text-white/75">
+                {selectedCount} {selectedCountLabel} selected
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={onClearSelection} disabled={isBusy} className="btn btn-secondary">
+                    Clear selection
+                </button>
+                <button type="button" onClick={onBulkEnable} disabled={isBusy} className="btn btn-secondary">
+                    Enable selected
+                </button>
+                <button type="button" onClick={onBulkDisable} disabled={isBusy} className="btn btn-secondary">
+                    Disable selected
+                </button>
+                <button
+                    type="button"
+                    onClick={onBulkDelete}
+                    disabled={!canDelete || isBusy}
+                    className="btn btn-danger"
+                >
+                    Delete selected
+                </button>
+            </div>
+        </div>
+    );
+}
+
+function BulkDeletePermissionsModal({
+    permissions,
+    roles,
+    onClose,
+    onConfirm,
+    isDeleting,
+}: {
+    permissions: Permission[];
+    roles: Role[];
+    onClose: () => void;
+    onConfirm: () => void;
+    isDeleting: boolean;
+}) {
+    const deletablePermissions = permissions.filter((permission) => !permission.is_system);
+    const systemPermissions = permissions.filter((permission) => permission.is_system);
+    const affectedRoles = useMemo(() => {
+        const deletableIds = new Set(deletablePermissions.map((permission) => permission.id));
+        return roles.filter((role) => role.permission_ids.some((id) => deletableIds.has(id)));
+    }, [deletablePermissions, roles]);
+    const affectedUsers = affectedRoles.reduce((sum, role) => sum + (role.user_count ?? 0), 0);
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#0f141d] p-7">
+                <h3 className="text-xl font-semibold text-white">Delete selected permissions</h3>
+                <p className="mt-2 text-sm text-white/60">
+                    This will permanently delete {deletablePermissions.length} selected {deletablePermissions.length === 1 ? "permission" : "permissions"}.
+                </p>
+                <div className="mt-4 rounded-xl border border-white/10 bg-[#0b121c] p-4">
+                    <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                            <p className="text-[11px] uppercase tracking-[0.12em] text-white/45">Affected roles</p>
+                            <p className="mt-1 text-sm font-semibold text-white">{affectedRoles.length}</p>
+                        </div>
+                        <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                            <p className="text-[11px] uppercase tracking-[0.12em] text-white/45">Affected users</p>
+                            <p className="mt-1 text-sm font-semibold text-white">{affectedUsers}</p>
+                        </div>
+                    </div>
+                    {systemPermissions.length > 0 && (
+                        <p className="mt-3 text-xs text-white/55">
+                            {systemPermissions.length} system {systemPermissions.length === 1 ? "permission is" : "permissions are"} selected and will be skipped.
+                        </p>
+                    )}
+                </div>
+                <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
+                    <button onClick={onClose} disabled={isDeleting} className="btn btn-secondary">
+                        Cancel
+                    </button>
+                    <button
+                        onClick={onConfirm}
+                        disabled={deletablePermissions.length === 0 || isDeleting}
+                        className="btn btn-danger"
+                    >
+                        {isDeleting ? "Deleting..." : "Delete selected"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 function CreatePermissionModal({
     permissions,

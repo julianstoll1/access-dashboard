@@ -328,3 +328,133 @@ export async function togglePermissionAction(
 
     return { ok: true, data: updated.data };
 }
+
+export async function bulkTogglePermissionsAction(
+    projectId: string,
+    ids: string[],
+    enabled: boolean
+): Promise<ActionResult<PermissionRecord[]>> {
+    const supabase = await createSupabaseServerClient();
+    const { data: authData } = await supabase.auth.getUser();
+
+    if (!authData?.user) {
+        return { ok: false, error: "Unauthorized." };
+    }
+
+    const projectCheck = await verifyProjectAccess(supabase, projectId);
+    if (!projectCheck.ok) {
+        return { ok: false, error: projectCheck.error };
+    }
+
+    const normalizedIds = Array.from(new Set((ids ?? []).filter(Boolean)));
+    if (normalizedIds.length === 0) {
+        return { ok: true, data: [] };
+    }
+
+    const { data: updatedRows, error: updateError } = await supabase
+        .from("permissions")
+        .update({ enabled })
+        .eq("project_id", projectId)
+        .in("id", normalizedIds)
+        .select("*");
+
+    if (updateError) {
+        return { ok: false, error: "Failed to update permissions." };
+    }
+
+    const updated = (updatedRows ?? []) as PermissionRecord[];
+
+    await Promise.all(
+        updated.map((permission) =>
+            logAuditEvent({
+                projectId,
+                userId: authData.user.id,
+                entityType: "permission",
+                entityId: permission.id,
+                action: "updated",
+                metadata: {
+                    event: enabled ? "permission_enabled" : "permission_disabled",
+                    name: permission.name,
+                    slug: permission.slug,
+                    enabled,
+                    source: "bulk",
+                },
+            })
+        )
+    );
+
+    return { ok: true, data: updated };
+}
+
+export async function bulkDeletePermissionsAction(
+    projectId: string,
+    ids: string[]
+): Promise<ActionResult<{
+    deletedIds: string[];
+    skippedSystemIds: string[];
+    failedIds: string[];
+}>> {
+    const supabase = await createSupabaseServerClient();
+    const { data: authData } = await supabase.auth.getUser();
+
+    if (!authData?.user) {
+        return { ok: false, error: "Unauthorized." };
+    }
+
+    const projectCheck = await verifyProjectAccess(supabase, projectId);
+    if (!projectCheck.ok) {
+        return { ok: false, error: projectCheck.error };
+    }
+
+    const normalizedIds = Array.from(new Set((ids ?? []).filter(Boolean)));
+    if (normalizedIds.length === 0) {
+        return {
+            ok: true,
+            data: { deletedIds: [], skippedSystemIds: [], failedIds: [] },
+        };
+    }
+
+    const { data: existing, error: existingError } = await supabase
+        .from("permissions")
+        .select("id, is_system, name, slug")
+        .eq("project_id", projectId)
+        .in("id", normalizedIds);
+
+    if (existingError) {
+        return { ok: false, error: "Failed to load permissions." };
+    }
+
+    const deletedIds: string[] = [];
+    const skippedSystemIds: string[] = [];
+    const failedIds: string[] = [];
+
+    for (const permission of existing ?? []) {
+        if (permission.is_system) {
+            skippedSystemIds.push(permission.id);
+            continue;
+        }
+
+        const deleted = await deletePermission(permission.id, projectId);
+        if (!deleted.ok) {
+            failedIds.push(permission.id);
+            continue;
+        }
+
+        deletedIds.push(permission.id);
+
+        await logAuditEvent({
+            projectId,
+            userId: authData.user.id,
+            entityType: "permission",
+            entityId: permission.id,
+            action: "deleted",
+            metadata: {
+                name: permission.name,
+                slug: permission.slug,
+                source: "bulk",
+            },
+        });
+    }
+
+    return { ok: true, data: { deletedIds, skippedSystemIds, failedIds } };
+}

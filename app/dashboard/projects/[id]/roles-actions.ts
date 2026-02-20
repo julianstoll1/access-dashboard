@@ -393,3 +393,214 @@ export async function deleteRoleAction(
 
     return { ok: true, data: { id } };
 }
+
+export async function bulkDeleteRolesAction(
+    projectId: string,
+    ids: string[]
+): Promise<ActionResult<{
+    deletedIds: string[];
+    skippedSystemIds: string[];
+    failedIds: string[];
+}>> {
+    const supabase = await createSupabaseServerClient();
+    const { data: authData } = await supabase.auth.getUser();
+
+    if (!authData?.user) {
+        return { ok: false, error: "Unauthorized." };
+    }
+
+    const projectCheck = await verifyProjectAccess(supabase, projectId);
+    if (!projectCheck.ok) {
+        return { ok: false, error: projectCheck.error };
+    }
+
+    const normalizedIds = Array.from(new Set((ids ?? []).filter(Boolean)));
+    if (normalizedIds.length === 0) {
+        return {
+            ok: true,
+            data: { deletedIds: [], skippedSystemIds: [], failedIds: [] },
+        };
+    }
+
+    const { data: existingRoles, error: existingError } = await supabase
+        .from("roles")
+        .select("id, is_system, name, slug")
+        .eq("project_id", projectId)
+        .in("id", normalizedIds);
+
+    if (existingError) {
+        return { ok: false, error: "Failed to load roles." };
+    }
+
+    const deletedIds: string[] = [];
+    const skippedSystemIds: string[] = [];
+    const failedIds: string[] = [];
+
+    for (const role of existingRoles ?? []) {
+        if (role.is_system) {
+            skippedSystemIds.push(role.id);
+            continue;
+        }
+
+        const deleted = await deleteRole(role.id, projectId);
+        if (!deleted.ok) {
+            failedIds.push(role.id);
+            continue;
+        }
+
+        deletedIds.push(role.id);
+
+        await logAuditEvent({
+            projectId,
+            userId: authData.user.id,
+            entityType: "role",
+            entityId: role.id,
+            action: "deleted",
+            metadata: {
+                name: role.name,
+                slug: role.slug,
+                source: "bulk",
+            },
+        });
+    }
+
+    return { ok: true, data: { deletedIds, skippedSystemIds, failedIds } };
+}
+
+export async function bulkAssignRolePermissionsAction(
+    projectId: string,
+    roleIds: string[],
+    permissionIds: string[],
+    mode: "add" | "remove" | "replace"
+): Promise<ActionResult<{ updatedRolePermissions: Record<string, string[]> }>> {
+    const supabase = await createSupabaseServerClient();
+    const { data: authData } = await supabase.auth.getUser();
+
+    if (!authData?.user) {
+        return { ok: false, error: "Unauthorized." };
+    }
+
+    const projectCheck = await verifyProjectAccess(supabase, projectId);
+    if (!projectCheck.ok) {
+        return { ok: false, error: projectCheck.error };
+    }
+
+    const normalizedRoleIds = Array.from(new Set((roleIds ?? []).filter(Boolean)));
+    const normalizedPermissionIds = Array.from(new Set((permissionIds ?? []).filter(Boolean)));
+
+    if (normalizedRoleIds.length === 0) {
+        return { ok: false, error: "No roles selected." };
+    }
+
+    if (normalizedPermissionIds.length === 0 && mode !== "replace") {
+        return { ok: false, error: "No permissions selected." };
+    }
+
+    const { data: rolesData, error: rolesError } = await supabase
+        .from("roles")
+        .select("id, name, slug")
+        .eq("project_id", projectId)
+        .in("id", normalizedRoleIds);
+
+    if (rolesError) {
+        return { ok: false, error: "Failed to load roles." };
+    }
+
+    if (!rolesData || rolesData.length === 0) {
+        return { ok: false, error: "No matching roles found." };
+    }
+
+    const permissionsCheck = await filterValidPermissionsBelongToProject(
+        supabase,
+        projectId,
+        normalizedPermissionIds
+    );
+
+    if (!permissionsCheck.ok) {
+        return { ok: false, error: permissionsCheck.error };
+    }
+
+    const validPermissionIds = permissionsCheck.validIds;
+
+    const { data: existingRolePermissions, error: rolePermissionsError } = await supabase
+        .from("role_permissions")
+        .select("role_id, permission_id")
+        .in("role_id", rolesData.map((role) => role.id));
+
+    if (rolePermissionsError) {
+        return { ok: false, error: "Failed to load role permissions." };
+    }
+
+    const currentByRole = new Map<string, Set<string>>();
+    for (const role of rolesData) {
+        currentByRole.set(role.id, new Set<string>());
+    }
+    for (const row of existingRolePermissions ?? []) {
+        if (!currentByRole.has(row.role_id)) continue;
+        currentByRole.get(row.role_id)?.add(row.permission_id);
+    }
+
+    const updatedRolePermissions: Record<string, string[]> = {};
+
+    for (const role of rolesData) {
+        const current = currentByRole.get(role.id) ?? new Set<string>();
+        let next = new Set(current);
+
+        if (mode === "replace") {
+            next = new Set(validPermissionIds);
+        }
+        if (mode === "add") {
+            for (const id of validPermissionIds) next.add(id);
+        }
+        if (mode === "remove") {
+            for (const id of validPermissionIds) next.delete(id);
+        }
+
+        const nextIds = Array.from(next);
+
+        const { error: deleteError } = await supabase
+            .from("role_permissions")
+            .delete()
+            .eq("role_id", role.id);
+        if (deleteError) {
+            return { ok: false, error: "Failed to update role permissions." };
+        }
+
+        if (nextIds.length > 0) {
+            const inserts = nextIds.map((permissionId) => ({
+                role_id: role.id,
+                permission_id: permissionId,
+            }));
+            const { error: insertError } = await supabase
+                .from("role_permissions")
+                .insert(inserts);
+            if (insertError) {
+                return { ok: false, error: "Failed to update role permissions." };
+            }
+        }
+
+        updatedRolePermissions[role.id] = nextIds;
+
+        await logAuditEvent({
+            projectId,
+            userId: authData.user.id,
+            entityType: "role",
+            entityId: role.id,
+            action: "updated",
+            metadata: {
+                event:
+                    mode === "replace"
+                        ? "role_permissions_replaced_bulk"
+                        : mode === "add"
+                            ? "role_permissions_added_bulk"
+                            : "role_permissions_removed_bulk",
+                name: role.name,
+                slug: role.slug,
+                permission_count: nextIds.length,
+                changed_permission_ids: validPermissionIds,
+            },
+        });
+    }
+
+    return { ok: true, data: { updatedRolePermissions } };
+}
