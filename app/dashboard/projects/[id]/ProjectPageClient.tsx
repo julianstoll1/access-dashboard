@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { ApiKeyDisplay } from "./ApiKeyDisplay";
 import { GenerateApiKeyButton } from "./GenerateApiKeyButton";
 import { BackButton } from "./BackButton";
@@ -66,18 +66,28 @@ type AuditLogInput = {
     created_at: string;
 };
 
+const PROJECT_TABS = ["overview", "api", "roles", "features", "audit", "integration"] as const;
+type ProjectTab = (typeof PROJECT_TABS)[number];
+
+function normalizeProjectTab(value: string | null | undefined): ProjectTab {
+    if (!value) return "overview";
+    return (PROJECT_TABS as readonly string[]).includes(value) ? (value as ProjectTab) : "overview";
+}
+
 export default function ProjectPageClient({
                                               project,
                                               apiKey,
                                               permissions,
-                                              roles: initialRoles,
-                                              auditLogs,
+                                          roles: initialRoles,
+                                          auditLogs,
                                           }: Props) {
-    const router = useRouter();
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
     const [rolesHasUnsavedChanges, setRolesHasUnsavedChanges] = useState(false);
     const [permissionsHasUnsavedChanges, setPermissionsHasUnsavedChanges] = useState(false);
-    const [pendingTabSwitch, setPendingTabSwitch] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState("overview");
+    const [pendingTabSwitch, setPendingTabSwitch] = useState<ProjectTab | null>(null);
+    const tabFromUrl = normalizeProjectTab(searchParams.get("tab"));
+    const [activeTab, setActiveTab] = useState<ProjectTab>(tabFromUrl);
     const [permissionsState, setPermissionsState] = useState<Permission[]>(() =>
         (permissions ?? []).map(normalizePermission)
     );
@@ -97,24 +107,31 @@ export default function ProjectPageClient({
         return () => window.removeEventListener("beforeunload", handler);
     }, [hasUnsavedChanges]);
 
-    const performTabSelect = useCallback((tabId: string) => {
-        setActiveTab(tabId);
-        if (tabId === "roles" || tabId === "features" || tabId === "audit") {
-            router.refresh();
-        }
-    }, [router]);
+    const setTabInUrl = useCallback((tab: ProjectTab) => {
+        const params = new URLSearchParams(window.location.search);
+        params.set("tab", tab);
+        const query = params.toString();
+        const nextUrl = query ? `${pathname}?${query}` : pathname;
+        window.history.replaceState(window.history.state, "", nextUrl);
+    }, [pathname]);
+
+    const performTabSelect = useCallback((tab: ProjectTab) => {
+        setActiveTab(tab);
+        setTabInUrl(tab);
+    }, [setTabInUrl]);
 
     const usageMonth = 24193;
     const usageLimit = 100000;
     const usagePercent = Math.round((usageMonth / usageLimit) * 100);
     const handleTabSelect = useCallback(
         (tabId: string) => {
-            if (tabId === activeTab) return;
+            const normalizedTab = normalizeProjectTab(tabId);
+            if (normalizedTab === activeTab) return;
             if (hasUnsavedChanges) {
-                setPendingTabSwitch(tabId);
+                setPendingTabSwitch(normalizedTab);
                 return;
             }
-            performTabSelect(tabId);
+            performTabSelect(normalizedTab);
         },
         [activeTab, hasUnsavedChanges, performTabSelect]
     );
