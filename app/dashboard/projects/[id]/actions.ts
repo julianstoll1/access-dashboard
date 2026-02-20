@@ -3,6 +3,7 @@
 import crypto from "crypto";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import { logAuditEvent } from "@/lib/auditLogs";
 
 const ENCRYPTION_SECRET = process.env.API_KEY_ENCRYPTION_SECRET!;
 
@@ -26,20 +27,30 @@ export async function generateApiKey(formData: FormData) {
     if (!projectId) throw new Error("Missing projectId");
 
     const supabase = await createSupabaseServerClient();
+    const { data: authData } = await supabase.auth.getUser();
 
     const rawKey = generateRawKey();
     const hash = crypto.createHash("sha256").update(rawKey).digest("hex");
     const encrypted = encrypt(rawKey);
 
-    const { error } = await supabase.from("api_keys").insert({
+    const { data: createdKey, error } = await supabase.from("api_keys").insert({
         project_id: projectId,
         key_hash: hash,
         key_encrypted: encrypted,
         created_at: new Date().toISOString(),
         last_rotated_at: new Date().toISOString(),
-    });
+    }).select("id").single();
 
     if (error) throw new Error("Failed to generate API key");
+
+    await logAuditEvent({
+        projectId,
+        userId: authData?.user?.id ?? null,
+        entityType: "api_key",
+        entityId: createdKey?.id ?? null,
+        action: "created",
+        metadata: { event: "api_key_generated" },
+    });
 
     revalidatePath(`/dashboard/projects/${projectId}`);
 }
@@ -49,6 +60,7 @@ export async function rotateApiKey(formData: FormData) {
     if (!projectId) throw new Error("Missing projectId");
 
     const supabase = await createSupabaseServerClient();
+    const { data: authData } = await supabase.auth.getUser();
 
     const rawKey = generateRawKey();
     const hash = crypto.createHash("sha256").update(rawKey).digest("hex");
@@ -64,6 +76,14 @@ export async function rotateApiKey(formData: FormData) {
         .eq("project_id", projectId);
 
     if (error) throw new Error("Failed to rotate API key");
+
+    await logAuditEvent({
+        projectId,
+        userId: authData?.user?.id ?? null,
+        entityType: "api_key",
+        action: "updated",
+        metadata: { event: "api_key_rotated" },
+    });
 
     revalidatePath(`/dashboard/projects/${projectId}`);
 }

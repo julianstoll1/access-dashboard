@@ -19,6 +19,7 @@ interface Props {
     } | null;
     permissions: PermissionInput[];
     roles: Role[];
+    auditLogs: AuditLogInput[];
 }
 
 type Role = {
@@ -54,11 +55,23 @@ type PermissionInput = {
     updated_at: string | null;
 };
 
+type AuditLogInput = {
+    id: string;
+    project_id: string;
+    user_id: string | null;
+    entity_type: string;
+    entity_id: string | null;
+    action: string;
+    metadata: Record<string, unknown> | null;
+    created_at: string;
+};
+
 export default function ProjectPageClient({
                                               project,
                                               apiKey,
                                               permissions,
                                               roles: initialRoles,
+                                              auditLogs,
                                           }: Props) {
     const router = useRouter();
     const [rolesHasUnsavedChanges, setRolesHasUnsavedChanges] = useState(false);
@@ -86,7 +99,7 @@ export default function ProjectPageClient({
 
     const performTabSelect = useCallback((tabId: string) => {
         setActiveTab(tabId);
-        if (tabId === "roles" || tabId === "features") {
+        if (tabId === "roles" || tabId === "features" || tabId === "audit") {
             router.refresh();
         }
     }, [router]);
@@ -130,6 +143,7 @@ export default function ProjectPageClient({
                         <SidebarItem id="api" activeTab={activeTab} onTabSelect={handleTabSelect} label="API Keys" />
                         <SidebarItem id="roles" activeTab={activeTab} onTabSelect={handleTabSelect} label="Roles" />
                         <SidebarItem id="features" activeTab={activeTab} onTabSelect={handleTabSelect} label="Permissions" />
+                        <SidebarItem id="audit" activeTab={activeTab} onTabSelect={handleTabSelect} label="Audit Log" />
                         <SidebarItem id="integration" activeTab={activeTab} onTabSelect={handleTabSelect} label="Integration" />
                     </aside>
 
@@ -192,6 +206,12 @@ export default function ProjectPageClient({
                                     onHasUnsavedChangesChange={setPermissionsHasUnsavedChanges}
                                 />
 
+                            </Section>
+                        )}
+
+                        {activeTab === "audit" && (
+                            <Section title="Audit Log">
+                                <AuditLogTimeline logs={auditLogs} />
                             </Section>
                         )}
 
@@ -2633,6 +2653,193 @@ function ConfirmDeleteModal({
                     </button>
                 </div>
             </div>
+        </div>
+    );
+}
+
+function AuditLogTimeline({ logs }: { logs: AuditLogInput[] }) {
+    const getMetaString = (log: AuditLogInput, key: string) => {
+        const value = log.metadata?.[key];
+        return typeof value === "string" ? value : null;
+    };
+
+    const getMetaNumber = (log: AuditLogInput, key: string) => {
+        const value = log.metadata?.[key];
+        return typeof value === "number" ? value : null;
+    };
+
+    const getMetaBoolean = (log: AuditLogInput, key: string) => {
+        const value = log.metadata?.[key];
+        return typeof value === "boolean" ? value : null;
+    };
+
+    const getActionVariant = (log: AuditLogInput) => {
+        const event = getMetaString(log, "event");
+        if (event === "permission_enabled") return "enabled";
+        if (event === "permission_disabled") return "disabled";
+        return log.action;
+    };
+
+    const actionLabel = (action: string) => {
+        if (action === "created") return "Created";
+        if (action === "updated") return "Updated";
+        if (action === "deleted") return "Deleted";
+        if (action === "enabled") return "Enabled";
+        if (action === "disabled") return "Disabled";
+        if (action === "granted") return "Enabled";
+        if (action === "revoked") return "Disabled";
+        return action;
+    };
+
+    const actionStyle = (action: string) => {
+        if (action === "created" || action === "enabled" || action === "granted") {
+            return "border-emerald-400/20 bg-emerald-500/10 text-emerald-200";
+        }
+        if (action === "deleted" || action === "disabled" || action === "revoked") {
+            return "border-red-400/20 bg-red-500/10 text-red-200";
+        }
+        return "border-white/10 bg-white/5 text-white/70";
+    };
+
+    const actionDotStyle = (action: string) => {
+        if (action === "created" || action === "enabled" || action === "granted") {
+            return "bg-emerald-300";
+        }
+        if (action === "deleted" || action === "disabled" || action === "revoked") {
+            return "bg-red-300";
+        }
+        return "bg-white/40";
+    };
+
+    const entityLabel = (entityType: string) => {
+        if (entityType === "permission") return "Permission";
+        if (entityType === "role") return "Role";
+        if (entityType === "api_key") return "API key";
+        return entityType;
+    };
+
+    const eventTitle = (log: AuditLogInput) => {
+        const variant = getActionVariant(log);
+        const entity = entityLabel(log.entity_type);
+        const name =
+            getMetaString(log, "name") ??
+            getMetaString(log, "slug") ??
+            (log.entity_type === "api_key" ? "API key" : entity.toLowerCase());
+
+        if (log.entity_type === "permission" && variant === "enabled") {
+            return `Permission "${name}" enabled`;
+        }
+        if (log.entity_type === "permission" && variant === "disabled") {
+            return `Permission "${name}" disabled`;
+        }
+        return `${entity} "${name}" ${actionLabel(variant).toLowerCase()}`;
+    };
+
+    const detailLine = (log: AuditLogInput) => {
+        const permissionCount = getMetaNumber(log, "permission_count");
+        const riskLevel = getMetaString(log, "risk_level");
+        const event = getMetaString(log, "event");
+        const enabled = getMetaBoolean(log, "enabled");
+
+        if (event === "api_key_rotated") return "Credentials rotated for this project.";
+        if (event === "api_key_generated") return "New credentials generated for this project.";
+        if (permissionCount !== null) {
+            return `${permissionCount} permission${permissionCount === 1 ? "" : "s"} linked.`;
+        }
+        if (riskLevel) return `Risk level: ${riskLevel}.`;
+        if (enabled !== null) return `Current status: ${enabled ? "enabled" : "disabled"}.`;
+        return null;
+    };
+
+    const formatTime = (value: string) => {
+        const d = new Date(value);
+        return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+    };
+
+    const dayLabel = (value: string) => {
+        const d = new Date(value);
+        const now = new Date();
+        const startNow = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        const startDate = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        const diffDays = Math.round((startNow - startDate) / 86400000);
+        if (diffDays === 0) return "Today";
+        if (diffDays === 1) return "Yesterday";
+        return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "2-digit" });
+    };
+
+    const groupedLogs = useMemo(() => {
+        const groups: Array<{ key: string; label: string; items: AuditLogInput[] }> = [];
+        for (const log of logs) {
+            const key = new Date(log.created_at).toISOString().slice(0, 10);
+            const existing = groups.find((group) => group.key === key);
+            if (existing) {
+                existing.items.push(log);
+            } else {
+                groups.push({ key, label: dayLabel(log.created_at), items: [log] });
+            }
+        }
+        return groups;
+    }, [logs]);
+
+    return (
+        <div className="mt-2 rounded-2xl border border-white/10 bg-gradient-to-b from-[#121a27] to-[#0f141d] p-5">
+            {logs.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-white/15 bg-[#0a0f16] px-6 py-10 text-center text-sm text-white/45">
+                    No audit events yet.
+                </div>
+            ) : (
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between rounded-xl border border-white/10 bg-[#0b111b]/90 px-4 py-2.5 text-xs text-white/50">
+                        <span>{logs.length} events</span>
+                        <span>Newest first</span>
+                    </div>
+                    <div className="max-h-[620px] space-y-5 overflow-y-auto pr-1">
+                        {groupedLogs.map((group) => (
+                            <div key={group.key}>
+                                <p className="mb-2 px-1 text-[11px] font-medium uppercase tracking-[0.14em] text-white/45">
+                                    {group.label}
+                                </p>
+                                <div className="space-y-2 rounded-xl border border-white/8 bg-[#0a1019] p-2.5">
+                                    {group.items.map((log) => {
+                                        const variant = getActionVariant(log);
+                                        const detail = detailLine(log);
+                                        return (
+                                            <div
+                                                key={log.id}
+                                                className="group relative overflow-hidden rounded-xl border border-white/10 bg-[#0b121d] px-4 py-3 transition hover:border-white/20 hover:bg-[#0c1521]"
+                                            >
+                                                <span className={`absolute left-0 top-0 h-full w-[2px] ${actionDotStyle(variant)}`} />
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <span className={`h-1.5 w-1.5 rounded-full ${actionDotStyle(variant)}`} />
+                                                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.12em] ${actionStyle(variant)}`}>
+                                                                {actionLabel(variant)}
+                                                            </span>
+                                                            <p className="truncate text-sm font-semibold text-white/92">
+                                                                {eventTitle(log)}
+                                                            </p>
+                                                        </div>
+                                                        {detail && (
+                                                            <p className="mt-1 text-xs text-white/62">{detail}</p>
+                                                        )}
+                                                        <p className="mt-1 text-xs text-white/45">
+                                                            By {log.user_id ? `${log.user_id.slice(0, 8)}...` : "system"}
+                                                        </p>
+                                                    </div>
+                                                    <span className="shrink-0 rounded-md bg-white/[0.04] px-2 py-0.5 text-xs text-white/50">
+                                                        {formatTime(log.created_at)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

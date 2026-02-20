@@ -3,6 +3,7 @@ import { getProject } from "@/lib/projects";
 import { getApiKeyForProject } from "@/lib/apiKeys";
 import { getPermissions } from "@/lib/permissions";
 import { getRoles } from "@/lib/roles";
+import { getAuditLogs } from "@/lib/auditLogs";
 
 
 import ProjectPageClient from "./ProjectPageClient";
@@ -21,6 +22,7 @@ export default async function ProjectPage({
 
     const permissions = await getPermissions(project.id);
     const roles = await getRoles(project.id);
+    const auditLogs = await getAuditLogs(project.id);
 
     return (
         <ProjectPageClient
@@ -28,6 +30,7 @@ export default async function ProjectPage({
             apiKey={apiKey}
             permissions={permissions}
             roles={roles}
+            auditLogs={auditLogs}
         />
     );
 }

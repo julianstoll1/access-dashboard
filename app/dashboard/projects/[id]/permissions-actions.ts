@@ -2,6 +2,7 @@
 
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { createPermission, updatePermission, deletePermission, togglePermission } from "@/lib/permissions";
+import { logAuditEvent } from "@/lib/auditLogs";
 
 export type PermissionRecord = {
     id: string;
@@ -167,6 +168,19 @@ export async function createPermissionAction(
         return { ok: false, error: "Failed to create permission." };
     }
 
+    await logAuditEvent({
+        projectId,
+        userId: authData.user.id,
+        entityType: "permission",
+        entityId: created.data.id,
+        action: "created",
+        metadata: {
+            name: created.data.name,
+            slug: created.data.slug,
+            risk_level: created.data.risk_level,
+        },
+    });
+
     return { ok: true, data: created.data };
 }
 
@@ -214,6 +228,20 @@ export async function updatePermissionAction(
         return { ok: false, error: "Failed to update permission." };
     }
 
+    await logAuditEvent({
+        projectId: updated.data.project_id,
+        userId: authData.user.id,
+        entityType: "permission",
+        entityId: updated.data.id,
+        action: "updated",
+        metadata: {
+            name: updated.data.name,
+            slug: updated.data.slug,
+            enabled: updated.data.enabled,
+            risk_level: updated.data.risk_level,
+        },
+    });
+
     return { ok: true, data: updated.data };
 }
 
@@ -233,11 +261,30 @@ export async function deletePermissionAction(
         return { ok: false, error: projectCheck.error };
     }
 
+    const { data: existingPermission } = await supabase
+        .from("permissions")
+        .select("name, slug")
+        .eq("id", id)
+        .eq("project_id", projectId)
+        .maybeSingle();
+
     const deleted = await deletePermission(id, projectId);
 
     if (!deleted.ok) {
         return { ok: false, error: "Failed to delete permission." };
     }
+
+    await logAuditEvent({
+        projectId,
+        userId: authData.user.id,
+        entityType: "permission",
+        entityId: id,
+        action: "deleted",
+        metadata: {
+            name: existingPermission?.name ?? null,
+            slug: existingPermission?.slug ?? null,
+        },
+    });
 
     return { ok: true, data: { id } };
 }
@@ -264,6 +311,20 @@ export async function togglePermissionAction(
     if (!updated.ok) {
         return { ok: false, error: "Failed to toggle permission." };
     }
+
+    await logAuditEvent({
+        projectId,
+        userId: authData.user.id,
+        entityType: "permission",
+        entityId: updated.data.id,
+        action: "updated",
+        metadata: {
+            event: enabled ? "permission_enabled" : "permission_disabled",
+            name: updated.data.name,
+            slug: updated.data.slug,
+            enabled,
+        },
+    });
 
     return { ok: true, data: updated.data };
 }

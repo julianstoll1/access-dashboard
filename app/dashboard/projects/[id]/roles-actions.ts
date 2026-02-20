@@ -1,6 +1,7 @@
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import { logAuditEvent } from "@/lib/auditLogs";
 import {
     createRole,
     deleteRole,
@@ -218,6 +219,20 @@ export async function createRoleAction(
         return { ok: false, error: "Failed to create role." };
     }
 
+    await logAuditEvent({
+        projectId,
+        userId: authData.user.id,
+        entityType: "role",
+        entityId: created.data.id,
+        action: "created",
+        metadata: {
+            name: created.data.name,
+            slug: created.data.slug,
+            permission_count: created.data.permission_ids.length,
+            is_system: created.data.is_system,
+        },
+    });
+
     return { ok: true, data: created.data };
 }
 
@@ -310,6 +325,20 @@ export async function updateRoleAction(
         return { ok: false, error: "Failed to update role." };
     }
 
+    await logAuditEvent({
+        projectId,
+        userId: authData.user.id,
+        entityType: "role",
+        entityId: updated.data.id,
+        action: "updated",
+        metadata: {
+            name: updated.data.name,
+            slug: updated.data.slug,
+            permission_count: updated.data.permission_ids.length,
+            is_system: updated.data.is_system,
+        },
+    });
+
     return { ok: true, data: updated.data };
 }
 
@@ -331,7 +360,7 @@ export async function deleteRoleAction(
 
     const { data: existingRole, error: roleError } = await supabase
         .from("roles")
-        .select("id, is_system")
+        .select("id, is_system, name, slug")
         .eq("id", id)
         .eq("project_id", projectId)
         .single();
@@ -349,6 +378,18 @@ export async function deleteRoleAction(
     if (!deleted.ok) {
         return { ok: false, error: "Failed to delete role." };
     }
+
+    await logAuditEvent({
+        projectId,
+        userId: authData.user.id,
+        entityType: "role",
+        entityId: id,
+        action: "deleted",
+        metadata: {
+            name: existingRole.name,
+            slug: existingRole.slug,
+        },
+    });
 
     return { ok: true, data: { id } };
 }
