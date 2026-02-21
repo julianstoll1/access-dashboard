@@ -1,5 +1,5 @@
-import { notFound } from "next/navigation";
-import { getProject } from "@/lib/projects";
+import { notFound, redirect } from "next/navigation";
+import { getProjectById, getProjectBySlug } from "@/lib/projects";
 import { getApiKeyForProject } from "@/lib/apiKeys";
 import { getPermissions } from "@/lib/permissions";
 import { getRoles } from "@/lib/roles";
@@ -13,9 +13,16 @@ export default async function ProjectPage({
                                           }: {
     params: Promise<{ id: string }>;
 }) {
-    const { id } = await params;
+    const { id: slugOrId } = await params;
 
-    const project = await getProject(id);
+    let project = await getProjectBySlug(slugOrId);
+    if (!project) {
+        const byId = await getProjectById(slugOrId);
+        if (byId) {
+            redirect(`/dashboard/projects/${byId.slug}`);
+        }
+    }
+    project = project ?? null;
     if (!project) return notFound();
 
     const apiKey = await getApiKeyForProject(project.id);

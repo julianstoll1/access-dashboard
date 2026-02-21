@@ -4,7 +4,7 @@ export type AuditLogRecord = {
     id: string;
     project_id: string;
     user_id: string | null;
-    entity_type: "permission" | "role" | "api_key" | string;
+    entity_type: "permission" | "role" | "api_key" | "project" | string;
     entity_id: string | null;
     action: "created" | "updated" | "deleted" | "granted" | "revoked" | string;
     metadata: Record<string, unknown> | null;
@@ -28,7 +28,7 @@ export async function getAuditLogs(projectId: string, limit = 200): Promise<Audi
 export async function logAuditEvent(input: {
     projectId: string;
     userId?: string | null;
-    entityType: "permission" | "role" | "api_key";
+    entityType: "permission" | "role" | "api_key" | "project";
     entityId?: string | null;
     action: "created" | "updated" | "deleted" | "granted" | "revoked";
     metadata?: Record<string, unknown>;

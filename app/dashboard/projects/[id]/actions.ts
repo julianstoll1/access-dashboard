@@ -22,6 +22,18 @@ function generateRawKey() {
     return `sk_live_${crypto.randomBytes(24).toString("hex")}`;
 }
 
+async function getProjectSlugById(projectId: string) {
+    const supabase = await createSupabaseServerClient();
+    const { data } = await supabase
+        .from("projects")
+        .select("slug")
+        .eq("id", projectId)
+        .is("deleted_at", null)
+        .maybeSingle();
+
+    return data?.slug ?? null;
+}
+
 export async function generateApiKey(formData: FormData) {
     const projectId = formData.get("projectId") as string;
     if (!projectId) throw new Error("Missing projectId");
@@ -52,7 +64,8 @@ export async function generateApiKey(formData: FormData) {
         metadata: { event: "api_key_generated" },
     });
 
-    revalidatePath(`/dashboard/projects/${projectId}`);
+    const projectSlug = await getProjectSlugById(projectId);
+    revalidatePath(`/dashboard/projects/${projectSlug ?? projectId}`);
 }
 
 export async function rotateApiKey(formData: FormData) {
@@ -85,5 +98,6 @@ export async function rotateApiKey(formData: FormData) {
         metadata: { event: "api_key_rotated" },
     });
 
-    revalidatePath(`/dashboard/projects/${projectId}`);
+    const projectSlug = await getProjectSlugById(projectId);
+    revalidatePath(`/dashboard/projects/${projectSlug ?? projectId}`);
 }

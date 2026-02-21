@@ -47,7 +47,7 @@ export default async function DashboardPage() {
                                 return (
                                     <a
                                         key={project.id}
-                                        href={`/dashboard/projects/${project.id}`}
+                                        href={`/dashboard/projects/${project.slug}`}
                                         className="group relative overflow-hidden rounded-3xl border border-white/5 bg-[#151922] p-10 transition hover:border-white/10 hover:bg-[#1a202c]"
                                     >
                                         {/* subtle top accent */}
@@ -60,9 +60,19 @@ export default async function DashboardPage() {
                                                     {project.name}
                                                 </h3>
 
-                                                <p className="mt-3 text-xs text-white/40 font-mono">
-                                                    {project.id}
-                                                </p>
+                                                <div className="mt-3 flex flex-wrap items-center gap-2">
+                                                    <p className="text-xs text-white/40 font-mono">
+                                                        {project.id}
+                                                    </p>
+                                                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] ${
+                                                        project.status === "archived"
+                                                            ? "border-amber-400/25 bg-amber-500/10 text-amber-200"
+                                                            : "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
+                                                    }`}>
+                                                        {project.status}
+                                                    </span>
+                                                </div>
+                                                <p className="mt-2 text-xs text-white/35 font-mono">{project.slug}</p>
                                             </div>
 
                                             <span className="text-xs text-white/30 group-hover:text-white/60 transition">

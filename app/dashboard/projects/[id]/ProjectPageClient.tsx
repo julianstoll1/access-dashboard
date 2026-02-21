@@ -10,7 +10,15 @@ import { useToast } from "@/components/feedback/ToastProvider";
 interface Props {
     project: {
         id: string;
+        owner_id: string;
         name: string;
+        slug: string;
+        description: string | null;
+        status: string;
+        created_at: string;
+        updated_at: string | null;
+        archived_at: string | null;
+        deleted_at: string | null;
     };
     apiKey: {
         key: string;
@@ -66,8 +74,9 @@ type AuditLogInput = {
     created_at: string;
 };
 
-const PROJECT_TABS = ["overview", "api", "roles", "features", "audit", "integration"] as const;
+const PROJECT_TABS = ["overview", "api", "roles", "features", "audit", "integration", "settings"] as const;
 type ProjectTab = (typeof PROJECT_TABS)[number];
+type ProjectModel = Props["project"];
 
 function normalizeProjectTab(value: string | null | undefined): ProjectTab {
     if (!value) return "overview";
@@ -87,9 +96,11 @@ export default function ProjectPageClient({
     const [isRefreshingAudit, startRefreshingAudit] = useTransition();
     const [rolesHasUnsavedChanges, setRolesHasUnsavedChanges] = useState(false);
     const [permissionsHasUnsavedChanges, setPermissionsHasUnsavedChanges] = useState(false);
+    const [settingsHasUnsavedChanges, setSettingsHasUnsavedChanges] = useState(false);
     const [pendingTabSwitch, setPendingTabSwitch] = useState<ProjectTab | null>(null);
     const tabFromUrl = normalizeProjectTab(searchParams.get("tab"));
     const [activeTab, setActiveTab] = useState<ProjectTab>(tabFromUrl);
+    const [projectState, setProjectState] = useState<ProjectModel>(project);
     const [permissionsState, setPermissionsState] = useState<Permission[]>(() =>
         (permissions ?? []).map(normalizePermission)
     );
@@ -97,7 +108,8 @@ export default function ProjectPageClient({
         (initialRoles ?? []).map(normalizeRole)
     );
 
-    const hasUnsavedChanges = rolesHasUnsavedChanges || permissionsHasUnsavedChanges;
+    const hasUnsavedChanges =
+        rolesHasUnsavedChanges || permissionsHasUnsavedChanges || settingsHasUnsavedChanges;
 
     useEffect(() => {
         if (!hasUnsavedChanges) return;
@@ -151,11 +163,22 @@ export default function ProjectPageClient({
 
                 {/* HEADER */}
                 <div className="mt-12 border-b border-white/5 pb-10">
-                    <h1 className="text-4xl font-semibold tracking-tight">
-                        {project.name}
-                    </h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-4xl font-semibold tracking-tight">
+                            {projectState.name}
+                        </h1>
+                        <span
+                            className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] ${
+                                projectState.status === "archived"
+                                    ? "border-amber-400/25 bg-amber-500/10 text-amber-200"
+                                    : "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
+                            }`}
+                        >
+                            {projectState.status}
+                        </span>
+                    </div>
                     <p className="mt-3 text-sm text-white/40">
-                        Project ID · {project.id}
+                        Project ID · {projectState.id}
                     </p>
                 </div>
 
@@ -169,6 +192,7 @@ export default function ProjectPageClient({
                         <SidebarItem id="features" activeTab={activeTab} onTabSelect={handleTabSelect} label="Permissions" />
                         <SidebarItem id="audit" activeTab={activeTab} onTabSelect={handleTabSelect} label="Audit Log" />
                         <SidebarItem id="integration" activeTab={activeTab} onTabSelect={handleTabSelect} label="Integration" />
+                        <SidebarItem id="settings" activeTab={activeTab} onTabSelect={handleTabSelect} label="Settings" />
                     </aside>
 
                     {/* CONTENT */}
@@ -193,12 +217,12 @@ export default function ProjectPageClient({
                                             No API key generated yet.
                                         </p>
                                         <div className="mt-8">
-                                            <GenerateApiKeyButton projectId={project.id} />
+                                            <GenerateApiKeyButton projectId={projectState.id} />
                                         </div>
                                     </>
                                 ) : (
                                     <ApiKeyDisplay
-                                        projectId={project.id}
+                                        projectId={projectState.id}
                                         apiKey={apiKey.key}
                                         createdAt={apiKey.created_at}
                                         lastRotatedAt={apiKey.last_rotated_at}
@@ -213,7 +237,7 @@ export default function ProjectPageClient({
                                     roles={roles}
                                     setRoles={setRoles}
                                     permissions={permissionsState}
-                                    projectId={project.id}
+                                    projectId={projectState.id}
                                     onHasUnsavedChangesChange={setRolesHasUnsavedChanges}
                                 />
                             </Section>
@@ -225,7 +249,7 @@ export default function ProjectPageClient({
                                 <PermissionsManager
                                     permissions={permissionsState}
                                     setPermissions={setPermissionsState}
-                                    projectId={project.id}
+                                    projectId={projectState.id}
                                     roles={roles}
                                     onHasUnsavedChangesChange={setPermissionsHasUnsavedChanges}
                                 />
@@ -259,6 +283,16 @@ export default function ProjectPageClient({
   })
 })`}</code>
                 </pre>
+                            </Section>
+                        )}
+
+                        {activeTab === "settings" && (
+                            <Section title="Project Settings">
+                                <ProjectSettingsManager
+                                    project={projectState}
+                                    onProjectChange={setProjectState}
+                                    onHasUnsavedChangesChange={setSettingsHasUnsavedChanges}
+                                />
                             </Section>
                         )}
 
@@ -299,6 +333,12 @@ import {
     updateRoleAction as updateRoleActionRaw,
     deleteRoleAction,
 } from "./roles-actions";
+import {
+    archiveProjectAction,
+    deleteProjectAction,
+    restoreProjectAction,
+    updateProjectSettingsAction,
+} from "./project-settings-actions";
 
 type Permission = {
     id: string;
@@ -3524,6 +3564,7 @@ function AuditLogTimeline({ logs }: { logs: AuditLogInput[] }) {
         if (entityType === "permission") return "Permission";
         if (entityType === "role") return "Role";
         if (entityType === "api_key") return "API key";
+        if (entityType === "project") return "Project";
         return entityType;
     };
 
@@ -3552,6 +3593,11 @@ function AuditLogTimeline({ logs }: { logs: AuditLogInput[] }) {
 
         if (event === "api_key_rotated") return "Credentials rotated for this project.";
         if (event === "api_key_generated") return "New credentials generated for this project.";
+        if (event === "project_settings_updated") return "Project metadata was updated.";
+        if (event === "project_owner_changed") return "Project ownership was updated.";
+        if (event === "project_archived") return "Project was moved to archived state.";
+        if (event === "project_restored") return "Project was restored to active state.";
+        if (event === "project_deleted") return "Project was marked as deleted.";
         if (permissionCount !== null) {
             return `${permissionCount} permission${permissionCount === 1 ? "" : "s"} linked.`;
         }
@@ -3649,6 +3695,339 @@ function AuditLogTimeline({ logs }: { logs: AuditLogInput[] }) {
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+function ProjectSettingsManager({
+    project,
+    onProjectChange,
+    onHasUnsavedChangesChange,
+}: {
+    project: ProjectModel;
+    onProjectChange: (project: ProjectModel) => void;
+    onHasUnsavedChangesChange: (value: boolean) => void;
+}) {
+    const router = useRouter();
+    const pathname = usePathname();
+    const toast = useToast();
+
+    const [name, setName] = useState(project.name);
+    const [slug, setSlug] = useState(project.slug);
+    const [slugTouched, setSlugTouched] = useState(project.slug !== slugify(project.name));
+    const [description, setDescription] = useState(project.description ?? "");
+    const [isSavingSettings, setIsSavingSettings] = useState(false);
+    const [isArchiving, setIsArchiving] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [deleteConfirmText, setDeleteConfirmText] = useState("");
+
+    useEffect(() => {
+        setName(project.name);
+        setSlug(project.slug);
+        setSlugTouched(project.slug !== slugify(project.name));
+        setDescription(project.description ?? "");
+    }, [project]);
+
+    const metadataDirty = useMemo(
+        () =>
+            name !== project.name ||
+            slug !== project.slug ||
+            description !== (project.description ?? ""),
+        [name, slug, description, project]
+    );
+    const isDirty = metadataDirty;
+
+    useEffect(() => {
+        onHasUnsavedChangesChange(isDirty);
+        return () => onHasUnsavedChangesChange(false);
+    }, [isDirty, onHasUnsavedChangesChange]);
+
+    const localErrors = useMemo(() => {
+        const errors: { name?: string; slug?: string } = {};
+        const normalizedName = name.trim();
+        const normalizedSlug = slug.trim();
+
+        if (!normalizedName) errors.name = "Project name is required.";
+        if (!normalizedSlug) errors.slug = "Project slug is required.";
+        if (normalizedSlug && !SLUG_REGEX.test(normalizedSlug)) {
+            errors.slug = "Use lowercase letters, numbers and dots only.";
+        }
+        return errors;
+    }, [name, slug]);
+
+    const canSaveMetadata = !localErrors.name && !localErrors.slug && metadataDirty;
+    const handleNameChange = (value: string) => {
+        setName(value);
+        if (!slugTouched) {
+            setSlug(slugify(value));
+        }
+    };
+
+    const handleSaveMetadata = async () => {
+        if (!canSaveMetadata || isSavingSettings) return;
+        setIsSavingSettings(true);
+        try {
+            const previousSlug = project.slug;
+            const result = await updateProjectSettingsAction(project.id, {
+                name: name.trim(),
+                slug: slug.trim(),
+                description: description.trim(),
+                status: project.status === "archived" ? "archived" : "active",
+            });
+            if (!result.ok) {
+                toast.error(result.error || "Failed to save project settings.");
+                return;
+            }
+            onProjectChange(result.data);
+            toast.success("Project settings saved.");
+            if (result.data.slug !== previousSlug) {
+                const query = window.location.search || "?tab=settings";
+                const nextPath = `/dashboard/projects/${result.data.slug}${query}`;
+                window.history.replaceState(window.history.state, "", nextPath);
+                if (pathname !== `/dashboard/projects/${result.data.slug}`) {
+                    router.replace(nextPath, { scroll: false });
+                }
+            }
+        } finally {
+            setIsSavingSettings(false);
+        }
+    };
+
+    const handleArchiveToggle = async () => {
+        setIsArchiving(true);
+        try {
+            const result =
+                project.status === "archived"
+                    ? await restoreProjectAction(project.id)
+                    : await archiveProjectAction(project.id);
+            if (!result.ok) {
+                toast.error(result.error || "Failed to update project status.");
+                return;
+            }
+            onProjectChange(result.data);
+            toast.success(project.status === "archived" ? "Project restored." : "Project archived.");
+            setShowArchiveConfirm(false);
+        } finally {
+            setIsArchiving(false);
+        }
+    };
+
+    const handleDeleteProject = async () => {
+        if (deleteConfirmText.trim() !== project.name) return;
+        setIsDeleting(true);
+        try {
+            const result = await deleteProjectAction(project.id);
+            if (!result.ok) {
+                toast.error(result.error || "Failed to delete project.");
+                return;
+            }
+            toast.success("Project deleted.");
+            setShowDeleteConfirm(false);
+            setDeleteConfirmText("");
+            window.location.assign("/dashboard");
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
+    return (
+        <>
+            <div className="space-y-5">
+                <div className="rounded-2xl border border-white/8 bg-gradient-to-b from-[#121823] to-[#0f141d] p-6">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                            <h3 className="text-base font-semibold text-white">Metadata</h3>
+                            <p className="mt-1 text-sm text-white/50">
+                                Configure how this project appears in the dashboard and API integrations.
+                            </p>
+                        </div>
+                        <span className="inline-flex rounded-full border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] text-white/70">
+                            {project.status}
+                        </span>
+                    </div>
+
+                    <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                        <label className="flex flex-col gap-2">
+                            <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/45">Project name</span>
+                            <input
+                                value={name}
+                                onChange={(e) => handleNameChange(e.target.value)}
+                                disabled={isSavingSettings}
+                                className="h-11 rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm text-white focus:border-white/25 focus:outline-none focus:ring-2 focus:ring-white/10"
+                            />
+                            {localErrors.name && <span className="text-xs text-red-300">{localErrors.name}</span>}
+                        </label>
+
+                        <label className="flex flex-col gap-2">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-[0.14em] text-white/45">
+                                Slug
+                                <InfoTip text="Stable project ID for links and API-side references. Must be unique and use lowercase letters, numbers, and dots." />
+                            </span>
+                            <input
+                                value={slug}
+                                onChange={(e) => {
+                                    setSlugTouched(true);
+                                    setSlug(e.target.value);
+                                }}
+                                disabled={isSavingSettings}
+                                className="h-11 rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm font-mono text-white focus:border-white/25 focus:outline-none focus:ring-2 focus:ring-white/10"
+                            />
+                            {localErrors.slug && <span className="text-xs text-red-300">{localErrors.slug}</span>}
+                        </label>
+
+                        <label className="flex flex-col gap-2 sm:col-span-2">
+                            <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/45">Description</span>
+                            <textarea
+                                rows={4}
+                                value={description}
+                                onChange={(e) => setDescription(e.target.value)}
+                                disabled={isSavingSettings}
+                                className="rounded-xl border border-white/10 bg-[#0a0f16] px-4 py-3 text-sm text-white focus:border-white/25 focus:outline-none focus:ring-2 focus:ring-white/10"
+                            />
+                        </label>
+                    </div>
+
+                    <div className="mt-5 grid gap-2 sm:grid-cols-3">
+                        <div className="rounded-xl border border-white/10 bg-[#0a0f16] px-3 py-2.5 text-xs text-white/70">
+                            <p className="text-white/45">Created</p>
+                            <p className="mt-1">{formatDateTimeDisplay(project.created_at)}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-[#0a0f16] px-3 py-2.5 text-xs text-white/70">
+                            <p className="text-white/45">Updated</p>
+                            <p className="mt-1">{formatDateTimeDisplay(project.updated_at)}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-[#0a0f16] px-3 py-2.5 text-xs text-white/70">
+                            <p className="text-white/45">Archived</p>
+                            <p className="mt-1">{formatDateTimeDisplay(project.archived_at)}</p>
+                        </div>
+                    </div>
+
+                    <div className="mt-5 flex justify-end border-t border-white/10 pt-4">
+                        <button
+                            type="button"
+                            onClick={handleSaveMetadata}
+                            disabled={!canSaveMetadata || isSavingSettings}
+                            className="btn btn-primary min-w-[150px]"
+                        >
+                            {isSavingSettings ? "Saving..." : "Save settings"}
+                        </button>
+                    </div>
+                </div>
+
+                <div className="rounded-2xl border border-red-400/15 bg-[#16131a] p-6">
+                    <h3 className="text-base font-semibold text-white">Danger zone</h3>
+                    <p className="mt-1 text-sm text-white/55">
+                        Archive to hide this project from active workflows, or permanently delete it.
+                    </p>
+                    <div className="mt-5 flex flex-wrap gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setShowArchiveConfirm(true)}
+                            className="btn btn-secondary"
+                        >
+                            {project.status === "archived" ? "Restore project" : "Archive project"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setDeleteConfirmText("");
+                                setShowDeleteConfirm(true);
+                            }}
+                            className="btn btn-danger"
+                        >
+                            Delete project
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {showArchiveConfirm && (
+                <ConfirmActionModal
+                    title={project.status === "archived" ? "Restore project?" : "Archive project?"}
+                    message={
+                        project.status === "archived"
+                            ? "The project will become active again and visible in normal workflows."
+                            : "The project will be marked as archived and moved out of active workflows."
+                    }
+                    confirmLabel={isArchiving ? "Saving..." : project.status === "archived" ? "Restore" : "Archive"}
+                    onCancel={() => setShowArchiveConfirm(false)}
+                    onConfirm={handleArchiveToggle}
+                    isBusy={isArchiving}
+                />
+            )}
+
+            {showDeleteConfirm && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+                    <div className="w-full max-w-md rounded-2xl border border-red-400/30 bg-[#0f141d] p-7 shadow-2xl">
+                        <h3 className="text-xl font-semibold text-white">Delete project</h3>
+                        <p className="mt-2 text-sm text-white/60">
+                            This will permanently delete the project and all related records. Type <span className="font-semibold text-white">{project.name}</span> to confirm.
+                        </p>
+                        <input
+                            value={deleteConfirmText}
+                            onChange={(e) => setDeleteConfirmText(e.target.value)}
+                            disabled={isDeleting}
+                            className="mt-4 h-11 w-full rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm text-white focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        />
+                        <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowDeleteConfirm(false);
+                                    setDeleteConfirmText("");
+                                }}
+                                disabled={isDeleting}
+                                className="btn btn-secondary"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleDeleteProject}
+                                disabled={deleteConfirmText.trim() !== project.name || isDeleting}
+                                className="btn btn-danger"
+                            >
+                                {isDeleting ? "Deleting..." : "Delete project"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
+    );
+}
+
+function ConfirmActionModal({
+    title,
+    message,
+    confirmLabel,
+    onCancel,
+    onConfirm,
+    isBusy,
+}: {
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onCancel: () => void;
+    onConfirm: () => void;
+    isBusy: boolean;
+}) {
+    return (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
+                <h3 className="text-xl font-semibold text-white">{title}</h3>
+                <p className="mt-2 text-sm text-white/60">{message}</p>
+                <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
+                    <button type="button" onClick={onCancel} disabled={isBusy} className="btn btn-secondary">
+                        Cancel
+                    </button>
+                    <button type="button" onClick={onConfirm} disabled={isBusy} className="btn btn-primary">
+                        {confirmLabel}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }
