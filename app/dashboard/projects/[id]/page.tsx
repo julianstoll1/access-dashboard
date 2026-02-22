@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { getProjectById, getProjectBySlug, getProjectOverviewKpis } from "@/lib/projects";
-import { getApiKeyForProject } from "@/lib/apiKeys";
+import { getApiKeysForProject } from "@/lib/apiKeys";
 import { getPermissions } from "@/lib/permissions";
 import { getRoles } from "@/lib/roles";
 import { getAuditLogs } from "@/lib/auditLogs";
@@ -25,7 +25,7 @@ export default async function ProjectPage({
     project = project ?? null;
     if (!project) return notFound();
 
-    const apiKey = await getApiKeyForProject(project.id);
+    const apiKeys = await getApiKeysForProject(project.id);
 
     const permissions = await getPermissions(project.id);
     const roles = await getRoles(project.id);
@@ -35,7 +35,7 @@ export default async function ProjectPage({
     return (
         <ProjectPageClient
             project={project}
-            apiKey={apiKey}
+            apiKeys={apiKeys}
             permissions={permissions}
             roles={roles}
             auditLogs={auditLogs}

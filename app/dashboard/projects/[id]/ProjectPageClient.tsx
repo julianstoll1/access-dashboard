@@ -2,8 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ApiKeyDisplay } from "./ApiKeyDisplay";
-import { GenerateApiKeyButton } from "./GenerateApiKeyButton";
+import { ApiKeysManager } from "./ApiKeysManager";
 import { BackButton } from "./BackButton";
 import { useToast } from "@/components/feedback/ToastProvider";
 
@@ -20,11 +19,7 @@ interface Props {
         archived_at: string | null;
         deleted_at: string | null;
     };
-    apiKey: {
-        key: string;
-        created_at: string;
-        last_rotated_at: string | null;
-    } | null;
+    apiKeys: ApiKeyItem[];
     permissions: PermissionInput[];
     roles: Role[];
     auditLogs: AuditLogInput[];
@@ -83,6 +78,18 @@ type AuditLogInput = {
     created_at: string;
 };
 
+type ApiKeyItem = {
+    id: string;
+    project_id: string;
+    name: string;
+    status: "active" | "revoked";
+    usage_count: number;
+    last_used_at: string | null;
+    created_at: string;
+    updated_at: string | null;
+    description: string | null;
+};
+
 const PROJECT_TABS = ["overview", "api", "roles", "features", "audit", "integration", "settings"] as const;
 type ProjectTab = (typeof PROJECT_TABS)[number];
 type ProjectModel = Props["project"];
@@ -94,7 +101,7 @@ function normalizeProjectTab(value: string | null | undefined): ProjectTab {
 
 export default function ProjectPageClient({
                                               project,
-                                              apiKey,
+                                              apiKeys,
                                           permissions,
                                           roles: initialRoles,
                                           auditLogs,
@@ -136,17 +143,22 @@ export default function ProjectPageClient({
         params.set("tab", tab);
         const query = params.toString();
         const nextUrl = query ? `${pathname}?${query}` : pathname;
+        // Immediate URL update for instant feedback.
         window.history.replaceState(window.history.state, "", nextUrl);
+        return nextUrl;
     }, [pathname]);
 
     const performTabSelect = useCallback((tab: ProjectTab) => {
+        setPendingTabSwitch(null);
         setActiveTab(tab);
-        setTabInUrl(tab);
-        if (tab === "audit" || tab === "overview") {
-            startRefreshingServerData(() => {
+        const nextUrl = setTabInUrl(tab);
+        startRefreshingServerData(() => {
+            // Keep App Router state in sync with the browser URL to prevent drift.
+            router.replace(nextUrl, { scroll: false });
+            if (tab === "audit" || tab === "overview") {
                 router.refresh();
-            });
-        }
+            }
+        });
     }, [router, setTabInUrl]);
 
     const formattedUsage = projectKpis.total_usage_count.toLocaleString("en-US");
@@ -253,23 +265,10 @@ export default function ProjectPageClient({
 
                         {activeTab === "api" && (
                             <Section title="API Credentials">
-                                {!apiKey ? (
-                                    <>
-                                        <p className="text-white/50">
-                                            No API key generated yet.
-                                        </p>
-                                        <div className="mt-8">
-                                            <GenerateApiKeyButton projectId={projectState.id} />
-                                        </div>
-                                    </>
-                                ) : (
-                                    <ApiKeyDisplay
-                                        projectId={projectState.id}
-                                        apiKey={apiKey.key}
-                                        createdAt={apiKey.created_at}
-                                        lastRotatedAt={apiKey.last_rotated_at}
-                                    />
-                                )}
+                                <ApiKeysManager
+                                    projectId={projectState.id}
+                                    initialKeys={apiKeys}
+                                />
                             </Section>
                         )}
 
@@ -3765,7 +3764,6 @@ function ProjectSettingsManager({
     onHasUnsavedChangesChange: (value: boolean) => void;
 }) {
     const router = useRouter();
-    const pathname = usePathname();
     const toast = useToast();
 
     const [name, setName] = useState(project.name);
@@ -3841,10 +3839,7 @@ function ProjectSettingsManager({
             if (result.data.slug !== previousSlug) {
                 const query = window.location.search || "?tab=settings";
                 const nextPath = `/dashboard/projects/${result.data.slug}${query}`;
-                window.history.replaceState(window.history.state, "", nextPath);
-                if (pathname !== `/dashboard/projects/${result.data.slug}`) {
-                    router.replace(nextPath, { scroll: false });
-                }
+                router.replace(nextPath, { scroll: false });
             }
         } finally {
             setIsSavingSettings(false);
@@ -4131,16 +4126,17 @@ function SidebarItem({
     const active = activeTab === id;
 
     return (
-        <div
+        <button
+            type="button"
             onClick={() => onTabSelect(id)}
-            className={`px-4 py-3 rounded-lg text-sm cursor-pointer transition ${
+            className={`w-full px-4 py-3 rounded-lg text-left text-sm cursor-pointer transition ${
                 active
                     ? "bg-white/5 text-white"
                     : "text-white/50 hover:bg-white/5 hover:text-white"
             }`}
         >
             {label}
-        </div>
+        </button>
     );
 }
 
