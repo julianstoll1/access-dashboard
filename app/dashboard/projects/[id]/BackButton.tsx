@@ -7,7 +7,7 @@ export function BackButton() {
 
     return (
         <button
-            onClick={() => router.back()}
+            onClick={() => router.push("/dashboard")}
             className="inline-flex items-center text-sm text-white/50 hover:text-white"
         >
             ← Back to projects
