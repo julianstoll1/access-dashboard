@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { getProjectById, getProjectBySlug } from "@/lib/projects";
+import { getProjectById, getProjectBySlug, getProjectOverviewKpis } from "@/lib/projects";
 import { getApiKeyForProject } from "@/lib/apiKeys";
 import { getPermissions } from "@/lib/permissions";
 import { getRoles } from "@/lib/roles";
@@ -30,6 +30,7 @@ export default async function ProjectPage({
     const permissions = await getPermissions(project.id);
     const roles = await getRoles(project.id);
     const auditLogs = await getAuditLogs(project.id);
+    const projectKpis = await getProjectOverviewKpis(project.id);
 
     return (
         <ProjectPageClient
@@ -38,6 +39,7 @@ export default async function ProjectPage({
             permissions={permissions}
             roles={roles}
             auditLogs={auditLogs}
+            projectKpis={projectKpis}
         />
     );
 }

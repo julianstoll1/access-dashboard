@@ -1,8 +1,9 @@
 import { LogoutButton } from "@/components/LogoutButton";
-import { getProjects } from "@/lib/projects";
+import { getProjectListKpis, getProjects } from "@/lib/projects";
 
 export default async function DashboardPage() {
     const projects = await getProjects();
+    const projectKpisById = await getProjectListKpis(projects.map((project) => project.id));
 
     return (
         <div className="min-h-screen bg-[#0e1117] text-white">
@@ -41,8 +42,7 @@ export default async function DashboardPage() {
                         <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
 
                             {projects.map((project) => {
-                                const demoCalls = 24000;
-                                const demoRoles = 3;
+                                const projectKpis = projectKpisById.get(project.id);
 
                                 return (
                                     <a
@@ -84,12 +84,12 @@ export default async function DashboardPage() {
 
                                             <ProjectMeta
                                                 label="API Calls"
-                                                value={demoCalls.toLocaleString("en-US")}
+                                                value={(projectKpis?.total_usage_count ?? 0).toLocaleString("en-US")}
                                             />
 
                                             <ProjectMeta
                                                 label="Roles"
-                                                value={demoRoles.toString()}
+                                                value={(projectKpis?.total_roles ?? 0).toString()}
                                             />
 
                                             <ProjectMeta

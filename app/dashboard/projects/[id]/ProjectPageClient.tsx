@@ -28,6 +28,15 @@ interface Props {
     permissions: PermissionInput[];
     roles: Role[];
     auditLogs: AuditLogInput[];
+    projectKpis: {
+        total_permissions: number;
+        enabled_permissions: number;
+        total_roles: number;
+        total_access_grants: number;
+        total_api_keys: number;
+        total_usage_count: number;
+        last_activity_at: string | null;
+    };
 }
 
 type Role = {
@@ -86,14 +95,15 @@ function normalizeProjectTab(value: string | null | undefined): ProjectTab {
 export default function ProjectPageClient({
                                               project,
                                               apiKey,
-                                              permissions,
+                                          permissions,
                                           roles: initialRoles,
                                           auditLogs,
+                                          projectKpis,
                                           }: Props) {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
-    const [isRefreshingAudit, startRefreshingAudit] = useTransition();
+    const [isRefreshingServerData, startRefreshingServerData] = useTransition();
     const [rolesHasUnsavedChanges, setRolesHasUnsavedChanges] = useState(false);
     const [permissionsHasUnsavedChanges, setPermissionsHasUnsavedChanges] = useState(false);
     const [settingsHasUnsavedChanges, setSettingsHasUnsavedChanges] = useState(false);
@@ -132,16 +142,19 @@ export default function ProjectPageClient({
     const performTabSelect = useCallback((tab: ProjectTab) => {
         setActiveTab(tab);
         setTabInUrl(tab);
-        if (tab === "audit") {
-            startRefreshingAudit(() => {
+        if (tab === "audit" || tab === "overview") {
+            startRefreshingServerData(() => {
                 router.refresh();
             });
         }
     }, [router, setTabInUrl]);
 
-    const usageMonth = 24193;
-    const usageLimit = 100000;
-    const usagePercent = Math.round((usageMonth / usageLimit) * 100);
+    const formattedUsage = projectKpis.total_usage_count.toLocaleString("en-US");
+    const lastActivityDisplay = formatDateTimeDisplay(projectKpis.last_activity_at);
+    const enabledRate =
+        projectKpis.total_permissions > 0
+            ? Math.round((projectKpis.enabled_permissions / projectKpis.total_permissions) * 100)
+            : 0;
     const handleTabSelect = useCallback(
         (tabId: string) => {
             const normalizedTab = normalizeProjectTab(tabId);
@@ -199,13 +212,42 @@ export default function ProjectPageClient({
                     <div className="min-w-0 max-w-full space-y-28">
 
                         {activeTab === "overview" && (
-                            <div className="grid grid-cols-3 gap-12">
-                                <MetricCard
-                                    label="API Calls (30d)"
-                                    value={usageMonth.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
-                                />
-                                <MetricCard label="Usage" value={`${usagePercent}%`} />
-                                <MetricCard label="Active Roles" value={roles.length.toString()} />
+                            <div className="space-y-5">
+                                {isRefreshingServerData && (
+                                    <p className="text-xs uppercase tracking-[0.12em] text-white/45">
+                                        Refreshing metrics...
+                                    </p>
+                                )}
+                                <div className="rounded-2xl border border-white/8 bg-gradient-to-b from-[#121823] to-[#0f141d] p-5">
+                                    <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Core Metrics</p>
+                                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                                        <OverviewKpiCard
+                                            label="Total permissions"
+                                            value={projectKpis.total_permissions.toString()}
+                                            hint="All permissions defined in this project"
+                                        />
+                                        <OverviewKpiCard
+                                            label="Enabled permissions"
+                                            value={projectKpis.enabled_permissions.toString()}
+                                            hint={`${enabledRate}% currently active`}
+                                        />
+                                        <OverviewKpiCard
+                                            label="Total roles"
+                                            value={projectKpis.total_roles.toString()}
+                                            hint="Role definitions available"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="rounded-2xl border border-white/8 bg-[#111722] p-5">
+                                    <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Operational Metrics</p>
+                                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                        <OverviewStatRow label="Access grants" value={projectKpis.total_access_grants.toString()} />
+                                        <OverviewStatRow label="API keys" value={projectKpis.total_api_keys.toString()} />
+                                        <OverviewStatRow label="Usage count" value={formattedUsage} />
+                                        <OverviewStatRow label="Last activity" value={lastActivityDisplay} />
+                                    </div>
+                                </div>
                             </div>
                         )}
 
@@ -259,7 +301,7 @@ export default function ProjectPageClient({
 
                         {activeTab === "audit" && (
                             <Section title="Audit Log">
-                                {isRefreshingAudit && (
+                                {isRefreshingServerData && (
                                     <p className="mb-4 text-xs uppercase tracking-[0.12em] text-white/45">
                                         Refreshing logs...
                                     </p>
@@ -376,12 +418,26 @@ function slugify(value: string) {
 
 function formatDateDisplay(value: string | null) {
     if (!value) return "Never";
-    return value.slice(0, 10);
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Never";
+    return date.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    });
 }
 
 function formatDateTimeDisplay(value: string | null) {
     if (!value) return "Never";
-    return value.replace("T", " ").slice(0, 16);
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Never";
+    return date.toLocaleString(undefined, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
 }
 
 function normalizeRiskLevel(
@@ -4135,15 +4191,29 @@ function InfoTip({ text }: { text: string }) {
     );
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
+function OverviewKpiCard({
+    label,
+    value,
+    hint,
+}: {
+    label: string;
+    value: string;
+    hint: string;
+}) {
     return (
-        <div className="rounded-2xl border border-white/5 bg-[#151922] p-10">
-            <p className="text-xs uppercase tracking-wider text-white/40">
-                {label}
-            </p>
-            <p className="mt-6 text-2xl font-semibold">
-                {value}
-            </p>
+        <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+            <p className="text-[11px] uppercase tracking-[0.13em] text-white/45">{label}</p>
+            <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+            <p className="mt-2 text-xs text-white/45">{hint}</p>
+        </div>
+    );
+}
+
+function OverviewStatRow({ label, value }: { label: string; value: string }) {
+    return (
+        <div className="rounded-xl border border-white/10 bg-[#0a0f16] px-4 py-3">
+            <p className="text-[11px] uppercase tracking-[0.13em] text-white/45">{label}</p>
+            <p className="mt-1 text-base font-medium text-white/90">{value}</p>
         </div>
     );
 }
