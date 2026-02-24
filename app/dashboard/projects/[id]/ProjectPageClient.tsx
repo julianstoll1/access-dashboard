@@ -100,6 +100,77 @@ function normalizeProjectTab(value: string | null | undefined): ProjectTab {
     return (PROJECT_TABS as readonly string[]).includes(value) ? (value as ProjectTab) : "overview";
 }
 
+type PersistedViewState = Record<string, string>;
+
+function getViewStorageKey(projectId: string, tab: string) {
+    return `access-dashboard:view:${projectId}:${tab}`;
+}
+
+function readPersistedViewState(
+    projectId: string,
+    tab: string,
+    defaults: PersistedViewState
+): PersistedViewState {
+    const next: PersistedViewState = { ...defaults };
+    if (typeof window === "undefined") return next;
+
+    try {
+        const raw = window.localStorage.getItem(getViewStorageKey(projectId, tab));
+        if (raw) {
+            const parsed = JSON.parse(raw) as unknown;
+            if (parsed && typeof parsed === "object") {
+                for (const key of Object.keys(defaults)) {
+                    const value = (parsed as Record<string, unknown>)[key];
+                    if (typeof value === "string") {
+                        next[key] = value;
+                    }
+                }
+            }
+        }
+    } catch {
+        // Ignore localStorage parsing issues and use defaults.
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    for (const key of Object.keys(defaults)) {
+        const paramValue = params.get(`${tab}_${key}`);
+        if (paramValue !== null) {
+            next[key] = paramValue;
+        }
+    }
+
+    return next;
+}
+
+function persistViewState(
+    projectId: string,
+    tab: string,
+    defaults: PersistedViewState,
+    state: PersistedViewState
+) {
+    if (typeof window === "undefined") return;
+
+    try {
+        window.localStorage.setItem(getViewStorageKey(projectId, tab), JSON.stringify(state));
+    } catch {
+        // Ignore localStorage write errors in private mode or restricted environments.
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    for (const key of Object.keys(defaults)) {
+        const paramName = `${tab}_${key}`;
+        const value = state[key] ?? "";
+        if (!value || value === defaults[key]) {
+            params.delete(paramName);
+        } else {
+            params.set(paramName, value);
+        }
+    }
+    const query = params.toString();
+    const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+    window.history.replaceState(window.history.state, "", nextUrl);
+}
+
 export default function ProjectPageClient({
                                               project,
                                               apiKeys,
@@ -608,6 +679,10 @@ function RolesManager({
     onHasUnsavedChangesChange: (value: boolean) => void;
 }) {
     const toast = useToast();
+    const viewDefaults = useMemo<PersistedViewState>(
+        () => ({ query: "", type: "all", sort: "created_at", dir: "desc" }),
+        []
+    );
     const availablePermissions = useMemo(() => permissions ?? [], [permissions]);
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState("all");
@@ -625,7 +700,36 @@ function RolesManager({
     const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
     const [isBulkAssignOpen, setIsBulkAssignOpen] = useState(false);
     const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
+    const [viewReady, setViewReady] = useState(false);
     const hasUnsavedChanges = createFormDirty || editFormDirty;
+
+    useEffect(() => {
+        setViewReady(false);
+        const persisted = readPersistedViewState(projectId, "roles", viewDefaults);
+        setQuery(persisted.query ?? "");
+        setTypeFilter(["all", "system", "custom"].includes(persisted.type) ? persisted.type : "all");
+        setSortKey(
+            ["name", "created_at", "permission_count"].includes(persisted.sort)
+                ? (persisted.sort as RoleSortKey)
+                : "created_at"
+        );
+        setSortDirection(
+            persisted.dir === "asc" || persisted.dir === "desc"
+                ? (persisted.dir as SortDirection)
+                : "desc"
+        );
+        setViewReady(true);
+    }, [projectId, viewDefaults]);
+
+    useEffect(() => {
+        if (!viewReady) return;
+        persistViewState(projectId, "roles", viewDefaults, {
+            query,
+            type: typeFilter,
+            sort: sortKey,
+            dir: sortDirection,
+        });
+    }, [projectId, query, sortDirection, sortKey, typeFilter, viewDefaults, viewReady]);
 
     useEffect(() => {
         onHasUnsavedChangesChange(hasUnsavedChanges);
@@ -2112,6 +2216,16 @@ function PermissionsManager({
     onHasUnsavedChangesChange: (value: boolean) => void;
 }) {
     const toast = useToast();
+    const viewDefaults = useMemo<PersistedViewState>(
+        () => ({
+            query: "",
+            status: "all",
+            risk: "all",
+            sort: "created_at",
+            dir: "desc",
+        }),
+        []
+    );
     const [query, setQuery] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [riskFilter, setRiskFilter] = useState("all");
@@ -2129,7 +2243,42 @@ function PermissionsManager({
     const [viewingPermissionId, setViewingPermissionId] = useState<string | null>(null);
     const [selectedPermissionIds, setSelectedPermissionIds] = useState<string[]>([]);
     const [isBulkDeletePermissionsOpen, setIsBulkDeletePermissionsOpen] = useState(false);
+    const [viewReady, setViewReady] = useState(false);
     const hasUnsavedChanges = createFormDirty || editFormDirty;
+
+    useEffect(() => {
+        setViewReady(false);
+        const persisted = readPersistedViewState(projectId, "permissions", viewDefaults);
+        setQuery(persisted.query ?? "");
+        setStatusFilter(
+            ["all", "enabled", "disabled"].includes(persisted.status) ? persisted.status : "all"
+        );
+        setRiskFilter(
+            ["all", "low", "medium", "high"].includes(persisted.risk) ? persisted.risk : "all"
+        );
+        setSortKey(
+            ["name", "usage_count", "created_at", "last_used_at"].includes(persisted.sort)
+                ? (persisted.sort as SortKey)
+                : "created_at"
+        );
+        setSortDirection(
+            persisted.dir === "asc" || persisted.dir === "desc"
+                ? (persisted.dir as SortDirection)
+                : "desc"
+        );
+        setViewReady(true);
+    }, [projectId, viewDefaults]);
+
+    useEffect(() => {
+        if (!viewReady) return;
+        persistViewState(projectId, "permissions", viewDefaults, {
+            query,
+            status: statusFilter,
+            risk: riskFilter,
+            sort: sortKey,
+            dir: sortDirection,
+        });
+    }, [projectId, query, riskFilter, sortDirection, sortKey, statusFilter, viewDefaults, viewReady]);
 
     useEffect(() => {
         onHasUnsavedChangesChange(hasUnsavedChanges);
@@ -3588,6 +3737,17 @@ function AuditLogTimeline({
     initialLogs: AuditLogInput[];
 }) {
     const toast = useToast();
+    const viewDefaults = useMemo<PersistedViewState>(
+        () => ({
+            query: "",
+            entity: "all",
+            action: "all",
+            user: "",
+            from: "",
+            to: "",
+        }),
+        []
+    );
     const [logs, setLogs] = useState<AuditLogInput[]>(initialLogs);
     const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(initialLogs.length >= 40);
@@ -3595,6 +3755,7 @@ function AuditLogTimeline({
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [isExportingCsv, setIsExportingCsv] = useState(false);
     const [isExportingJson, setIsExportingJson] = useState(false);
+    const [viewReady, setViewReady] = useState(false);
 
     const [queryInput, setQueryInput] = useState("");
     const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -3616,6 +3777,38 @@ function AuditLogTimeline({
         setPage(1);
         setHasMore(initialLogs.length >= 40);
     }, [projectId, initialLogs]);
+
+    useEffect(() => {
+        setViewReady(false);
+        const persisted = readPersistedViewState(projectId, "audit", viewDefaults);
+        setQueryInput(persisted.query ?? "");
+        setEntityFilter(
+            ["all", "permission", "role", "api_key", "project"].includes(persisted.entity)
+                ? persisted.entity
+                : "all"
+        );
+        setActionFilter(
+            ["all", "created", "updated", "deleted", "granted", "revoked"].includes(persisted.action)
+                ? persisted.action
+                : "all"
+        );
+        setUserFilter(persisted.user ?? "");
+        setDateFrom(persisted.from ?? "");
+        setDateTo(persisted.to ?? "");
+        setViewReady(true);
+    }, [projectId, viewDefaults]);
+
+    useEffect(() => {
+        if (!viewReady) return;
+        persistViewState(projectId, "audit", viewDefaults, {
+            query: queryInput,
+            entity: entityFilter,
+            action: actionFilter,
+            user: userFilter,
+            from: dateFrom,
+            to: dateTo,
+        });
+    }, [actionFilter, dateFrom, dateTo, entityFilter, projectId, queryInput, userFilter, viewDefaults, viewReady]);
 
     const filters = useMemo<AuditLogFilterInput>(
         () => ({
