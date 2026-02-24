@@ -4,7 +4,8 @@ import { memo, useCallback, useEffect, useMemo, useState, useTransition } from "
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ApiKeysManager } from "./ApiKeysManager";
 import { BackButton } from "./BackButton";
-import { useToast } from "@/components/feedback/ToastProvider";
+import { extractErrorMessage, useToast } from "@/components/feedback/ToastProvider";
+import { exportAuditLogsAction, listAuditLogsAction, type AuditLogFilterInput } from "./audit-actions";
 
 interface Props {
     project: {
@@ -305,7 +306,7 @@ export default function ProjectPageClient({
                                         Refreshing logs...
                                     </p>
                                 )}
-                                <AuditLogTimeline logs={auditLogs} />
+                                <AuditLogTimeline projectId={projectState.id} initialLogs={auditLogs} />
                             </Section>
                         )}
 
@@ -3561,7 +3562,158 @@ function ConfirmDeleteModal({
     );
 }
 
-function AuditLogTimeline({ logs }: { logs: AuditLogInput[] }) {
+function AuditLogTimeline({
+    projectId,
+    initialLogs,
+}: {
+    projectId: string;
+    initialLogs: AuditLogInput[];
+}) {
+    const toast = useToast();
+    const [logs, setLogs] = useState<AuditLogInput[]>(initialLogs);
+    const [page, setPage] = useState(1);
+    const [hasMore, setHasMore] = useState(initialLogs.length >= 40);
+    const [isLoading, setIsLoading] = useState(false);
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [isExportingCsv, setIsExportingCsv] = useState(false);
+    const [isExportingJson, setIsExportingJson] = useState(false);
+
+    const [queryInput, setQueryInput] = useState("");
+    const [debouncedQuery, setDebouncedQuery] = useState("");
+    const [entityFilter, setEntityFilter] = useState("all");
+    const [actionFilter, setActionFilter] = useState("all");
+    const [userFilter, setUserFilter] = useState("");
+    const [dateFrom, setDateFrom] = useState("");
+    const [dateTo, setDateTo] = useState("");
+
+    useEffect(() => {
+        const timeout = window.setTimeout(() => {
+            setDebouncedQuery(queryInput.trim());
+        }, 260);
+        return () => window.clearTimeout(timeout);
+    }, [queryInput]);
+
+    useEffect(() => {
+        setLogs(initialLogs);
+        setPage(1);
+        setHasMore(initialLogs.length >= 40);
+    }, [projectId, initialLogs]);
+
+    const filters = useMemo<AuditLogFilterInput>(
+        () => ({
+            entityType: entityFilter === "all" ? undefined : entityFilter,
+            action: actionFilter === "all" ? undefined : actionFilter,
+            userId: userFilter.trim() || undefined,
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
+            query: debouncedQuery || undefined,
+        }),
+        [actionFilter, dateFrom, dateTo, debouncedQuery, entityFilter, userFilter]
+    );
+
+    const hasActiveFilters = useMemo(
+        () =>
+            Boolean(
+                filters.entityType ||
+                    filters.action ||
+                    filters.userId ||
+                    filters.dateFrom ||
+                    filters.dateTo ||
+                    filters.query
+            ),
+        [filters]
+    );
+
+    const fetchLogs = useCallback(
+        async (nextPage: number, mode: "replace" | "append") => {
+            if (mode === "replace") setIsLoading(true);
+            if (mode === "append") setIsLoadingMore(true);
+            try {
+                const result = await listAuditLogsAction(projectId, {
+                    filters,
+                    page: nextPage,
+                    pageSize: 40,
+                });
+                if (!result.ok) {
+                    toast.error(result.error || "Failed to load audit logs.");
+                    return;
+                }
+                const rows = result.data.rows;
+                setLogs((prev) => (mode === "replace" ? rows : [...prev, ...rows]));
+                setPage(nextPage);
+                setHasMore(result.data.hasMore);
+            } catch (error) {
+                toast.error(extractErrorMessage(error, "Failed to load audit logs."));
+            } finally {
+                if (mode === "replace") setIsLoading(false);
+                if (mode === "append") setIsLoadingMore(false);
+            }
+        },
+        [filters, projectId, toast]
+    );
+
+    useEffect(() => {
+        void fetchLogs(1, "replace");
+    }, [fetchLogs]);
+
+    const resetFilters = () => {
+        setQueryInput("");
+        setEntityFilter("all");
+        setActionFilter("all");
+        setUserFilter("");
+        setDateFrom("");
+        setDateTo("");
+    };
+
+    const userOptions = useMemo(() => {
+        const set = new Set<string>();
+        for (const log of logs) {
+            if (log.user_id) set.add(log.user_id);
+        }
+        return Array.from(set).sort((a, b) => a.localeCompare(b));
+    }, [logs]);
+
+    const exportRows = useCallback(
+        async (format: "csv" | "json") => {
+            if (format === "csv") setIsExportingCsv(true);
+            if (format === "json") setIsExportingJson(true);
+            try {
+                const result = await exportAuditLogsAction(projectId, filters);
+                if (!result.ok) {
+                    toast.error(result.error || "Failed to export audit logs.");
+                    return;
+                }
+                if (result.data.rows.length === 0) {
+                    toast.error("No audit logs found for the current filter.");
+                    return;
+                }
+
+                const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+                const filenameBase = `audit-log-${stamp}`;
+
+                if (format === "json") {
+                    const json = JSON.stringify(result.data.rows, null, 2);
+                    downloadBlob(json, `${filenameBase}.json`, "application/json");
+                } else {
+                    const csv = toAuditCsv(result.data.rows);
+                    downloadBlob(csv, `${filenameBase}.csv`, "text/csv;charset=utf-8;");
+                }
+
+                if (result.data.truncated) {
+                    toast.success("Export created (limited to 5,000 rows).");
+                } else {
+                    toast.success("Export created.");
+                }
+            } catch (error) {
+                toast.error(extractErrorMessage(error, "Failed to export audit logs."));
+            } finally {
+                if (format === "csv") setIsExportingCsv(false);
+                if (format === "json") setIsExportingJson(false);
+            }
+        },
+        [filters, projectId, toast]
+    );
+
     const getMetaString = (log: AuditLogInput, key: string) => {
         const value = log.metadata?.[key];
         return typeof value === "string" ? value : null;
@@ -3693,9 +3845,120 @@ function AuditLogTimeline({ logs }: { logs: AuditLogInput[] }) {
 
     return (
         <div className="mt-2 rounded-2xl border border-white/10 bg-gradient-to-b from-[#121a27] to-[#0f141d] p-5">
-            {logs.length === 0 ? (
+            <div className="mb-4 rounded-xl border border-white/10 bg-[#0b111b]/90 p-3.5">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+                    <label className="xl:col-span-2">
+                        <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-white/45">Search</span>
+                        <input
+                            value={queryInput}
+                            onChange={(e) => setQueryInput(e.target.value)}
+                            placeholder="Search event, action, user or metadata"
+                            className="h-10 w-full rounded-lg border border-white/10 bg-[#0a0f16] px-3 text-sm text-white/85 placeholder:text-white/35 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        />
+                    </label>
+                    <label>
+                        <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-white/45">Entity</span>
+                        <select
+                            value={entityFilter}
+                            onChange={(e) => setEntityFilter(e.target.value)}
+                            className="h-10 w-full rounded-lg border border-white/10 bg-[#0a0f16] px-3 text-sm text-white/85 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        >
+                            <option value="all">All entities</option>
+                            <option value="permission">Permission</option>
+                            <option value="role">Role</option>
+                            <option value="api_key">API key</option>
+                            <option value="project">Project</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-white/45">Action</span>
+                        <select
+                            value={actionFilter}
+                            onChange={(e) => setActionFilter(e.target.value)}
+                            className="h-10 w-full rounded-lg border border-white/10 bg-[#0a0f16] px-3 text-sm text-white/85 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        >
+                            <option value="all">All actions</option>
+                            <option value="created">Created</option>
+                            <option value="updated">Updated</option>
+                            <option value="deleted">Deleted</option>
+                            <option value="granted">Granted</option>
+                            <option value="revoked">Revoked</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-white/45">User</span>
+                        <select
+                            value={userFilter}
+                            onChange={(e) => setUserFilter(e.target.value)}
+                            className="h-10 w-full rounded-lg border border-white/10 bg-[#0a0f16] px-3 text-sm text-white/85 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        >
+                            <option value="">All users</option>
+                            {userOptions.map((userId) => (
+                                <option key={userId} value={userId}>
+                                    {userId}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <label>
+                        <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-white/45">From</span>
+                        <input
+                            type="date"
+                            value={dateFrom}
+                            onChange={(e) => setDateFrom(e.target.value)}
+                            className="h-10 w-full rounded-lg border border-white/10 bg-[#0a0f16] px-3 text-sm text-white/85 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        />
+                    </label>
+                    <label>
+                        <span className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-white/45">To</span>
+                        <input
+                            type="date"
+                            value={dateTo}
+                            onChange={(e) => setDateTo(e.target.value)}
+                            className="h-10 w-full rounded-lg border border-white/10 bg-[#0a0f16] px-3 text-sm text-white/85 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
+                        />
+                    </label>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs text-white/50">
+                        {hasActiveFilters ? "Filtered view" : "All events"}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={resetFilters}
+                            disabled={isLoading || isLoadingMore || !hasActiveFilters}
+                            className="btn btn-secondary px-3 py-2 text-xs"
+                        >
+                            Reset filters
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => void exportRows("csv")}
+                            disabled={isExportingCsv || isExportingJson}
+                            className="btn btn-secondary px-3 py-2 text-xs"
+                        >
+                            {isExportingCsv ? "Exporting..." : "Export CSV"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => void exportRows("json")}
+                            disabled={isExportingCsv || isExportingJson}
+                            className="btn btn-secondary px-3 py-2 text-xs"
+                        >
+                            {isExportingJson ? "Exporting..." : "Export JSON"}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {isLoading ? (
+                <div className="rounded-xl border border-white/10 bg-[#0a0f16] px-6 py-10 text-center text-sm text-white/55">
+                    Loading audit logs...
+                </div>
+            ) : logs.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-white/15 bg-[#0a0f16] px-6 py-10 text-center text-sm text-white/45">
-                    No audit events yet.
+                    No audit events found.
                 </div>
             ) : (
                 <div className="space-y-4">
@@ -3748,10 +4011,67 @@ function AuditLogTimeline({ logs }: { logs: AuditLogInput[] }) {
                             </div>
                         ))}
                     </div>
+                    <div className="flex justify-center pt-1">
+                        {hasMore ? (
+                            <button
+                                type="button"
+                                onClick={() => void fetchLogs(page + 1, "append")}
+                                disabled={isLoadingMore}
+                                className="btn btn-secondary px-4 py-2 text-xs"
+                            >
+                                {isLoadingMore ? "Loading..." : "Load more"}
+                            </button>
+                        ) : (
+                            <span className="text-xs text-white/45">End of audit log</span>
+                        )}
+                    </div>
                 </div>
             )}
         </div>
     );
+}
+
+function toAuditCsv(rows: AuditLogInput[]) {
+    const headers = [
+        "id",
+        "created_at",
+        "entity_type",
+        "entity_id",
+        "action",
+        "user_id",
+        "metadata",
+    ];
+    const lines = [headers.join(",")];
+    for (const row of rows) {
+        const values = [
+            row.id,
+            row.created_at,
+            row.entity_type,
+            row.entity_id ?? "",
+            row.action,
+            row.user_id ?? "",
+            row.metadata ? JSON.stringify(row.metadata) : "",
+        ];
+        lines.push(values.map(csvEscape).join(","));
+    }
+    return lines.join("\n");
+}
+
+function csvEscape(value: string) {
+    const normalized = value.replaceAll('"', '""');
+    return /[",\n]/.test(normalized) ? `"${normalized}"` : normalized;
+}
+
+function downloadBlob(contents: string, filename: string, mimeType: string) {
+    const blob = new Blob([contents], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
 }
 
 function ProjectSettingsManager({
