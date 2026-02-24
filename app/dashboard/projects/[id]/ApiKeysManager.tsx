@@ -385,6 +385,14 @@ export function ApiKeysManager({
                         <p className="mt-1 text-xs text-white/50">
                             Generate your first key to start using the API.
                         </p>
+                        <button
+                            type="button"
+                            onClick={openCreateModal}
+                            disabled={busy !== null}
+                            className="btn btn-primary mt-4"
+                        >
+                            {busy?.type === "generate" ? "Generating..." : "Generate first API key"}
+                        </button>
                     </div>
                 )}
             </div>

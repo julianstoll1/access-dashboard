@@ -1949,6 +1949,22 @@ function RoleDetailModal({
                     <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
                         <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Users with role</p>
                         <p className="mt-2 text-sm text-white/85">{role.user_count}</p>
+                        {role.user_count === 0 && (
+                            <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5">
+                                <p className="text-xs text-white/55">No users assigned yet.</p>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const params = new URLSearchParams(window.location.search);
+                                        params.set("tab", "integration");
+                                        window.location.assign(`${window.location.pathname}?${params.toString()}`);
+                                    }}
+                                    className="btn btn-secondary mt-2 px-3 py-1.5 text-xs"
+                                >
+                                    Open integration guide
+                                </button>
+                            </div>
+                        )}
                     </div>
                     <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
                         <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Updated at</p>
@@ -3960,7 +3976,30 @@ function AuditLogTimeline({
                 </div>
             ) : logs.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-white/15 bg-[#0a0f16] px-6 py-10 text-center text-sm text-white/45">
-                    No audit events found.
+                    <p>{hasActiveFilters ? "No audit matches for current filters." : "No audit events found."}</p>
+                    <div className="mt-4 flex justify-center gap-2">
+                        {hasActiveFilters ? (
+                            <button
+                                type="button"
+                                onClick={resetFilters}
+                                className="btn btn-secondary px-3 py-2 text-xs"
+                            >
+                                Clear filters
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const params = new URLSearchParams(window.location.search);
+                                    params.set("tab", "api");
+                                    window.location.assign(`${window.location.pathname}?${params.toString()}`);
+                                }}
+                                className="btn btn-secondary px-3 py-2 text-xs"
+                            >
+                                Go to API keys
+                            </button>
+                        )}
+                    </div>
                 </div>
             ) : (
                 <div className="space-y-4">
