@@ -383,19 +383,12 @@ export default function ProjectPageClient({
 
                         {activeTab === "integration" && (
                             <Section title="Integration">
-                <pre className="text-xs text-white/70 overflow-x-auto bg-[#151922] p-6 rounded-xl">
-                  <code>{`await fetch("https://api.yourapp.com/access/check", {
-  method: "POST",
-  headers: {
-    "Authorization": "Bearer sk_live_...",
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    user_id: "user_123",
-    resource: "feature_export"
-  })
-})`}</code>
-                </pre>
+                                <IntegrationGuide
+                                    project={projectState}
+                                    permissions={permissionsState}
+                                    roles={roles}
+                                    apiKeys={apiKeys}
+                                />
                             </Section>
                         )}
 
@@ -4605,6 +4598,185 @@ function downloadBlob(contents: string, filename: string, mimeType: string) {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+}
+
+function IntegrationGuide({
+    project,
+    permissions,
+    roles,
+    apiKeys,
+}: {
+    project: ProjectModel;
+    permissions: Permission[];
+    roles: Role[];
+    apiKeys: ApiKeyItem[];
+}) {
+    const toast = useToast();
+    const enabledPermission = permissions.find((permission) => permission.enabled) ?? permissions[0];
+    const roleExample = roles.find((role) => !role.is_system) ?? roles[0];
+    const activeKeyCount = apiKeys.filter((key) => key.status === "active").length;
+    const resourceSlug = enabledPermission?.slug ?? "feature.read";
+    const roleSlug = roleExample?.slug ?? "member";
+    const endpoint = `https://api.yourapp.com/v1/projects/${project.slug}/access/check`;
+
+    const curlSnippet = `curl -X POST "${endpoint}" \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "user_id": "user_123",
+    "resource": "${resourceSlug}",
+    "role": "${roleSlug}"
+  }'`;
+
+    const jsSnippet = `const response = await fetch("${endpoint}", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer YOUR_API_KEY",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    user_id: "user_123",
+    resource: "${resourceSlug}",
+    role: "${roleSlug}",
+  }),
+});
+
+const result = await response.json();
+console.log(result);`;
+
+    const tsSnippet = `type AccessCheckRequest = {
+  user_id: string;
+  resource: string;
+  role?: string;
+};
+
+type AccessCheckResponse = {
+  allowed: boolean;
+  reason?: string;
+};
+
+const payload: AccessCheckRequest = {
+  user_id: "user_123",
+  resource: "${resourceSlug}",
+  role: "${roleSlug}",
+};
+
+const res = await fetch("${endpoint}", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer YOUR_API_KEY",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(payload),
+});
+
+const data: AccessCheckResponse = await res.json();`;
+
+    const copyText = async (value: string, label: string) => {
+        await navigator.clipboard.writeText(value);
+        toast.success(`${label} copied.`);
+    };
+
+    return (
+        <div className="space-y-5">
+            <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-[#121823] to-[#0f141d] p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Quick Start</p>
+                        <h3 className="mt-2 text-lg font-semibold text-white">Integrate this project in 3 steps</h3>
+                        <p className="mt-1 text-sm text-white/55">
+                            Examples below are prefilled with live slugs from this project.
+                        </p>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => void copyText(endpoint, "Endpoint")}
+                        className="btn btn-secondary px-3 py-2 text-xs"
+                    >
+                        Copy endpoint
+                    </button>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-3">
+                        <p className="text-xs font-semibold text-white/85">1. Create API key</p>
+                        <p className="mt-1 text-xs text-white/55">
+                            Active keys: {activeKeyCount}. Create one in the API Keys tab.
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                const params = new URLSearchParams(window.location.search);
+                                params.set("tab", "api");
+                                window.location.assign(`${window.location.pathname}?${params.toString()}`);
+                            }}
+                            className="btn btn-secondary mt-2 px-3 py-1.5 text-xs"
+                        >
+                            Open API keys
+                        </button>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-3">
+                        <p className="text-xs font-semibold text-white/85">2. Use real slugs</p>
+                        <p className="mt-1 text-xs text-white/55">Permission: <span className="font-mono">{resourceSlug}</span></p>
+                        <p className="mt-1 text-xs text-white/55">Role: <span className="font-mono">{roleSlug}</span></p>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                const params = new URLSearchParams(window.location.search);
+                                params.set("tab", "features");
+                                window.location.assign(`${window.location.pathname}?${params.toString()}`);
+                            }}
+                            className="btn btn-secondary mt-2 px-3 py-1.5 text-xs"
+                        >
+                            Open permissions
+                        </button>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-3">
+                        <p className="text-xs font-semibold text-white/85">3. Call access check</p>
+                        <p className="mt-1 text-xs text-white/55">
+                            Start with cURL, then move to JS/TS in your app.
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => void copyText(curlSnippet, "cURL snippet")}
+                            className="btn btn-secondary mt-2 px-3 py-1.5 text-xs"
+                        >
+                            Copy cURL
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-3">
+                <IntegrationSnippetCard title="cURL" code={curlSnippet} onCopy={() => void copyText(curlSnippet, "cURL snippet")} />
+                <IntegrationSnippetCard title="JavaScript" code={jsSnippet} onCopy={() => void copyText(jsSnippet, "JavaScript snippet")} />
+                <IntegrationSnippetCard title="TypeScript" code={tsSnippet} onCopy={() => void copyText(tsSnippet, "TypeScript snippet")} />
+            </div>
+        </div>
+    );
+}
+
+function IntegrationSnippetCard({
+    title,
+    code,
+    onCopy,
+}: {
+    title: string;
+    code: string;
+    onCopy: () => void;
+}) {
+    return (
+        <div className="rounded-2xl border border-white/10 bg-[#111722] p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-white">{title}</p>
+                <button type="button" onClick={onCopy} className="btn btn-secondary px-3 py-1.5 text-xs">
+                    Copy
+                </button>
+            </div>
+            <pre className="max-h-[360px] overflow-auto rounded-xl border border-white/10 bg-[#0a0f16] p-3 text-[11px] leading-5 text-white/80">
+                <code>{code}</code>
+            </pre>
+        </div>
+    );
 }
 
 function ProjectSettingsManager({
