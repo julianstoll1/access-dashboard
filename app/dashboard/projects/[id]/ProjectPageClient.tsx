@@ -1254,8 +1254,43 @@ function RolesTable({
     allVisibleRolesSelected: boolean;
 }) {
     return (
-        <div className="mt-6 w-full min-w-0 max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-[#0f141d] shadow-[0_20px_45px_-30px_rgba(0,0,0,0.9)] lg:overflow-x-hidden">
-            <div className="min-w-[980px] max-w-full lg:min-w-0 lg:w-full">
+        <div className="mt-6 w-full min-w-0 max-w-full rounded-2xl border border-white/10 bg-[#0f141d] shadow-[0_20px_45px_-30px_rgba(0,0,0,0.9)]">
+            <div className="lg:hidden border-b border-white/10 px-4 py-3">
+                <label className="inline-flex items-center gap-2 text-xs text-white/70">
+                    <input
+                        type="checkbox"
+                        checked={allVisibleRolesSelected}
+                        onChange={onToggleSelectAllVisibleRoles}
+                        className="h-4 w-4 rounded border-white/20 bg-[#0a0f16] text-white focus:ring-white/20"
+                        aria-label="Select all visible roles"
+                    />
+                    Select all visible
+                </label>
+            </div>
+
+            <div className="space-y-3 p-3 lg:hidden">
+                {roles.map((role) => (
+                    <RoleCardItem
+                        key={role.id}
+                        role={role}
+                        permissionById={permissionById}
+                        onView={onView}
+                        onEdit={onEdit}
+                        onDelete={onDelete}
+                        isBusy={isBusy}
+                        isSelected={selectedRoleIds.has(role.id)}
+                        onToggleSelection={onToggleRoleSelection}
+                    />
+                ))}
+
+                {roles.length === 0 && (
+                    <div className="px-6 py-10 text-center text-sm text-white/45">
+                        No roles found
+                    </div>
+                )}
+            </div>
+
+            <div className="hidden min-w-[980px] max-w-full overflow-x-auto lg:block lg:min-w-0 lg:w-full lg:overflow-x-hidden">
                 <div className="grid grid-cols-[48px_minmax(260px,2fr)_200px_130px_170px_130px_190px] border-b border-white/10 bg-[#111827] px-6 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white/45 lg:grid-cols-[48px_minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.6fr)_minmax(0,1fr)]">
                     <label className="flex items-center justify-center">
                         <input
@@ -1297,6 +1332,108 @@ function RolesTable({
         </div>
     );
 }
+
+const RoleCardItem = memo(function RoleCardItem({
+    role,
+    permissionById,
+    onView,
+    onEdit,
+    onDelete,
+    isBusy,
+    isSelected,
+    onToggleSelection,
+}: {
+    role: Role;
+    permissionById: Map<string, Permission>;
+    onView: (role: Role) => void;
+    onEdit: (role: Role) => void;
+    onDelete: (role: Role) => void;
+    isBusy: boolean;
+    isSelected: boolean;
+    onToggleSelection: (roleId: string) => void;
+}) {
+    const permissionPreview = role.permission_ids
+        .map((id) => permissionById.get(id)?.name)
+        .filter(Boolean)
+        .slice(0, 2)
+        .join(", ");
+
+    return (
+        <div
+            role="button"
+            tabIndex={0}
+            onClick={() => onView(role)}
+            onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onView(role);
+                }
+            }}
+            className="rounded-xl border border-white/10 bg-[#0a0f16] p-4 transition hover:border-white/20"
+        >
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <p className="truncate font-semibold text-white">{role.name}</p>
+                    <p className="mt-1 truncate font-mono text-xs text-white/55">{role.slug}</p>
+                </div>
+                <label
+                    className="shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                >
+                    <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => onToggleSelection(role.id)}
+                        className="h-4 w-4 rounded border-white/20 bg-[#0a0f16] text-white focus:ring-white/20"
+                        aria-label={`Select role ${role.name}`}
+                    />
+                </label>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-white/70">
+                <div className="rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-2">
+                    <p className="text-white/45">Type</p>
+                    <p className="mt-1">{role.is_system ? "System" : "Custom"}</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-2">
+                    <p className="text-white/45">Users</p>
+                    <p className="mt-1">{role.user_count}</p>
+                </div>
+                <div className="col-span-2 rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-2">
+                    <p className="text-white/45">Permissions</p>
+                    <p className="mt-1">
+                        {role.permission_ids.length} assigned
+                        {permissionPreview ? ` · ${permissionPreview}` : ""}
+                    </p>
+                </div>
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onEdit(role);
+                    }}
+                    disabled={isBusy}
+                    className="btn btn-secondary px-3 py-2 text-xs"
+                >
+                    Edit
+                </button>
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (!role.is_system) onDelete(role);
+                    }}
+                    disabled={role.is_system || isBusy}
+                    className="btn btn-danger px-3 py-2 text-xs"
+                >
+                    Delete
+                </button>
+            </div>
+        </div>
+    );
+});
 
 const RoleListRow = memo(function RoleListRow({
     role,
@@ -2828,8 +2965,45 @@ function PermissionsTable({
     isBulkBusy: boolean;
 }) {
     return (
-        <div className="mt-6 w-full min-w-0 max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-[#0f141d] shadow-[0_20px_45px_-30px_rgba(0,0,0,0.9)] lg:overflow-x-hidden">
-            <div className="min-w-[920px] max-w-full lg:min-w-0 lg:w-full">
+        <div className="mt-6 w-full min-w-0 max-w-full rounded-2xl border border-white/10 bg-[#0f141d] shadow-[0_20px_45px_-30px_rgba(0,0,0,0.9)]">
+            <div className="lg:hidden border-b border-white/10 px-4 py-3">
+                <label className="inline-flex items-center gap-2 text-xs text-white/70">
+                    <input
+                        type="checkbox"
+                        checked={allVisiblePermissionsSelected}
+                        onChange={onToggleSelectAllVisiblePermissions}
+                        disabled={isBulkBusy}
+                        className="h-4 w-4 rounded border-white/20 bg-[#0a0f16] text-white focus:ring-white/20"
+                        aria-label="Select all visible permissions"
+                    />
+                    Select all visible
+                </label>
+            </div>
+
+            <div className="space-y-3 p-3 lg:hidden">
+                {permissions.map((permission) => (
+                    <PermissionCardItem
+                        key={permission.id}
+                        permission={permission}
+                        onView={onView}
+                        onToggle={onToggle}
+                        isToggling={togglingPermissionId === permission.id}
+                        onEdit={onEdit}
+                        onDelete={onDelete}
+                        isSelected={selectedPermissionIds.has(permission.id)}
+                        onToggleSelection={onTogglePermissionSelection}
+                        isBulkBusy={isBulkBusy}
+                    />
+                ))}
+
+                {permissions.length === 0 && (
+                    <div className="px-6 py-10 text-center text-sm text-white/45">
+                        No permissions found
+                    </div>
+                )}
+            </div>
+
+            <div className="hidden min-w-[920px] max-w-full overflow-x-auto lg:block lg:min-w-0 lg:w-full lg:overflow-x-hidden">
                 <div className="grid grid-cols-[48px_minmax(340px,2.4fr)_200px_130px_130px_150px_170px] border-b border-white/10 bg-[#111827] px-6 py-3 text-[11px] font-medium uppercase tracking-[0.15em] text-white/45 lg:grid-cols-[48px_minmax(0,2.4fr)_minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.9fr)_minmax(0,1fr)]">
                     <label className="flex items-center justify-center">
                         <input
@@ -2873,6 +3047,131 @@ function PermissionsTable({
         </div>
     );
 }
+
+const PermissionCardItem = memo(function PermissionCardItem({
+    permission,
+    onView,
+    onToggle,
+    isToggling,
+    onEdit,
+    onDelete,
+    isSelected,
+    onToggleSelection,
+    isBulkBusy,
+}: {
+    permission: Permission;
+    onView: (permission: Permission) => void;
+    onToggle: (permission: Permission) => void;
+    isToggling: boolean;
+    onEdit: (permission: Permission) => void;
+    onDelete: (permission: Permission) => void;
+    isSelected: boolean;
+    onToggleSelection: (permissionId: string) => void;
+    isBulkBusy: boolean;
+}) {
+    const riskColor =
+        permission.risk_level === "low"
+            ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
+            : permission.risk_level === "medium"
+                ? "border-amber-400/20 bg-amber-400/10 text-amber-200"
+                : "border-red-400/20 bg-red-400/10 text-red-300";
+
+    const statusColor = permission.enabled
+        ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-300"
+        : "border-white/10 bg-white/5 text-white/60";
+
+    return (
+        <div
+            role="button"
+            tabIndex={0}
+            onClick={() => onView(permission)}
+            onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onView(permission);
+                }
+            }}
+            className="rounded-xl border border-white/10 bg-[#0a0f16] p-4 transition hover:border-white/20"
+        >
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <p className="truncate font-semibold text-white">{permission.name}</p>
+                    <p className="mt-1 truncate font-mono text-xs text-white/55">{permission.slug}</p>
+                </div>
+                <label
+                    className="shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                >
+                    <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => onToggleSelection(permission.id)}
+                        disabled={isBulkBusy}
+                        className="h-4 w-4 rounded border-white/20 bg-[#0a0f16] text-white focus:ring-white/20"
+                        aria-label={`Select permission ${permission.name}`}
+                    />
+                </label>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-white/70">
+                <div className="rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-2">
+                    <p className="text-white/45">Status</p>
+                    <p className={`mt-1 inline-flex rounded-full border px-2 py-0.5 ${statusColor}`}>
+                        {isToggling ? "Saving..." : permission.enabled ? "Enabled" : "Disabled"}
+                    </p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-2">
+                    <p className="text-white/45">Risk</p>
+                    <p className={`mt-1 inline-flex rounded-full border px-2 py-0.5 capitalize ${riskColor}`}>
+                        {permission.risk_level}
+                    </p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-2">
+                    <p className="text-white/45">Usage</p>
+                    <p className="mt-1">{permission.usage_count.toLocaleString("en-US")}</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-2">
+                    <p className="text-white/45">Last used</p>
+                    <p className="mt-1">{permission.last_used_at_display}</p>
+                </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onToggle(permission);
+                    }}
+                    disabled={isToggling || isBulkBusy}
+                    className="btn btn-secondary px-3 py-2 text-xs"
+                >
+                    {permission.enabled ? "Disable" : "Enable"}
+                </button>
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onEdit(permission);
+                    }}
+                    disabled={isBulkBusy}
+                    className="btn btn-secondary px-3 py-2 text-xs"
+                >
+                    Edit
+                </button>
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (!permission.is_system) onDelete(permission);
+                    }}
+                    disabled={permission.is_system || isBulkBusy}
+                    className="btn btn-danger px-3 py-2 text-xs"
+                >
+                    Delete
+                </button>
+            </div>
+        </div>
+    );
+});
 
 const PermissionRow = memo(function PermissionRow({
     permission,
