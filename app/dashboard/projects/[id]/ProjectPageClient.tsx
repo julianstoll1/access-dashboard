@@ -2570,7 +2570,7 @@ function FilterBar({
                         <input
                             value={query}
                             onChange={(e) => onQueryChange(e.target.value)}
-                            placeholder="Permissions suchen"
+                            placeholder="Search permissions"
                             className="h-11 rounded-xl border border-white/10 bg-[#0a0f16] px-4 text-sm text-white placeholder:text-white/35 focus:border-white/20 focus:outline-none focus:ring-2 focus:ring-white/10"
                         />
                     </label>
