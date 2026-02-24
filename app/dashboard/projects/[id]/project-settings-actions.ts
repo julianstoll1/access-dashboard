@@ -8,10 +8,40 @@ type ActionResult<T> =
     | { ok: true; data: T }
     | { ok: false; error: string };
 
+export type ProjectConfigPermission = {
+    slug: string;
+    name: string;
+    description: string | null;
+    risk_level: "low" | "medium" | "high";
+    enabled: boolean;
+    is_system: boolean;
+};
+
+export type ProjectConfigRole = {
+    slug: string;
+    name: string;
+    description: string | null;
+    is_system: boolean;
+    permission_slugs: string[];
+};
+
+export type ProjectConfigExport = {
+    version: 1;
+    exported_at: string;
+    project: {
+        id: string;
+        slug: string;
+        name: string;
+    };
+    permissions: ProjectConfigPermission[];
+    roles: ProjectConfigRole[];
+};
+
 const SLUG_REGEX = /^[a-z0-9.]+$/;
 const MAX_NAME_LENGTH = 120;
 const MAX_DESCRIPTION_LENGTH = 1000;
 const VALID_STATUSES = new Set(["active", "archived"]);
+const VALID_RISK_LEVELS = new Set(["low", "medium", "high"]);
 
 function normalizeName(name: string) {
     return name.trim();
@@ -72,6 +102,23 @@ async function getProjectForUpdate(
     }
 
     return { ok: true, data: data as ProjectRecord } as const;
+}
+
+async function ensureProjectAccess(
+    supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+    projectId: string
+) {
+    const { data: authData } = await supabase.auth.getUser();
+    if (!authData?.user) {
+        return { ok: false, error: "Unauthorized.", userId: null } as const;
+    }
+
+    const project = await getProjectForUpdate(supabase, projectId);
+    if (!project.ok) {
+        return { ok: false, error: project.error, userId: authData.user.id } as const;
+    }
+
+    return { ok: true, userId: authData.user.id, project: project.data } as const;
 }
 
 async function hasDuplicateProjectSlug(
@@ -309,4 +356,329 @@ export async function deleteProjectAction(projectId: string): Promise<ActionResu
     }
 
     return { ok: true, data: { id: projectId } };
+}
+
+function normalizeImportPermission(raw: ProjectConfigPermission): ProjectConfigPermission | null {
+    const slug = normalizeSlug(raw.slug ?? "");
+    const name = normalizeName(raw.name ?? "");
+    const description = normalizeDescription(raw.description ?? undefined);
+    const riskLevel = raw.risk_level;
+    const enabled = Boolean(raw.enabled);
+    const is_system = Boolean(raw.is_system);
+
+    if (!slug || !name || !SLUG_REGEX.test(slug)) return null;
+    if (!VALID_RISK_LEVELS.has(riskLevel)) return null;
+    return {
+        slug,
+        name,
+        description,
+        risk_level: riskLevel,
+        enabled,
+        is_system,
+    };
+}
+
+function normalizeImportRole(raw: ProjectConfigRole): ProjectConfigRole | null {
+    const slug = normalizeSlug(raw.slug ?? "");
+    const name = normalizeName(raw.name ?? "");
+    const description = normalizeDescription(raw.description ?? undefined);
+    const is_system = Boolean(raw.is_system);
+    const permission_slugs = Array.from(
+        new Set((raw.permission_slugs ?? []).map((item) => normalizeSlug(item)).filter(Boolean))
+    );
+
+    if (!slug || !name || !SLUG_REGEX.test(slug)) return null;
+    return {
+        slug,
+        name,
+        description,
+        is_system,
+        permission_slugs,
+    };
+}
+
+export async function exportProjectConfigAction(
+    projectId: string
+): Promise<ActionResult<ProjectConfigExport>> {
+    const supabase = await createSupabaseServerClient();
+    const access = await ensureProjectAccess(supabase, projectId);
+    if (!access.ok) return { ok: false, error: access.error };
+
+    const { data: permissions, error: permissionsError } = await supabase
+        .from("permissions")
+        .select("id, slug, name, description, risk_level, enabled, is_system")
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: true });
+
+    if (permissionsError) return { ok: false, error: "Failed to export permissions." };
+
+    const { data: roles, error: rolesError } = await supabase
+        .from("roles")
+        .select("id, slug, name, description, is_system")
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: true });
+
+    if (rolesError) return { ok: false, error: "Failed to export roles." };
+
+    const roleIds = (roles ?? []).map((role) => role.id);
+    const { data: rolePermissions, error: rolePermissionsError } = roleIds.length
+        ? await supabase
+              .from("role_permissions")
+              .select("role_id, permission_id")
+              .in("role_id", roleIds)
+        : { data: [], error: null };
+
+    if (rolePermissionsError) return { ok: false, error: "Failed to export role assignments." };
+
+    const permissionSlugById = new Map<string, string>();
+    for (const permission of permissions ?? []) {
+        permissionSlugById.set(permission.id, permission.slug);
+    }
+
+    const permissionSlugsByRoleId = new Map<string, string[]>();
+    for (const row of rolePermissions ?? []) {
+        const slug = permissionSlugById.get(row.permission_id);
+        if (!slug) continue;
+        const current = permissionSlugsByRoleId.get(row.role_id) ?? [];
+        current.push(slug);
+        permissionSlugsByRoleId.set(row.role_id, current);
+    }
+
+    const payload: ProjectConfigExport = {
+        version: 1,
+        exported_at: new Date().toISOString(),
+        project: {
+            id: access.project.id,
+            slug: access.project.slug,
+            name: access.project.name,
+        },
+        permissions: (permissions ?? []).map((permission) => ({
+            slug: permission.slug,
+            name: permission.name,
+            description: permission.description,
+            risk_level: permission.risk_level,
+            enabled: permission.enabled,
+            is_system: permission.is_system,
+        })),
+        roles: (roles ?? []).map((role) => ({
+            slug: role.slug,
+            name: role.name,
+            description: role.description,
+            is_system: role.is_system,
+            permission_slugs: permissionSlugsByRoleId.get(role.id) ?? [],
+        })),
+    };
+
+    await logAuditEvent({
+        projectId,
+        userId: access.userId,
+        entityType: "project",
+        entityId: projectId,
+        action: "updated",
+        metadata: {
+            event: "project_config_exported",
+            permission_count: payload.permissions.length,
+            role_count: payload.roles.length,
+        },
+    });
+
+    return { ok: true, data: payload };
+}
+
+export async function importProjectConfigAction(
+    projectId: string,
+    input: unknown
+): Promise<
+    ActionResult<{
+        importedPermissions: number;
+        importedRoles: number;
+        assignmentUpdates: number;
+        skippedInvalidPermissions: number;
+        skippedInvalidRoles: number;
+    }>
+> {
+    const supabase = await createSupabaseServerClient();
+    const access = await ensureProjectAccess(supabase, projectId);
+    if (!access.ok) return { ok: false, error: access.error };
+
+    if (!input || typeof input !== "object") {
+        return { ok: false, error: "Invalid config file format." };
+    }
+    const payload = input as Partial<ProjectConfigExport>;
+
+    if (payload.version !== 1) {
+        return { ok: false, error: "Invalid config file format." };
+    }
+
+    const rawPermissions = Array.isArray(payload.permissions) ? payload.permissions : [];
+    const rawRoles = Array.isArray(payload.roles) ? payload.roles : [];
+
+    const permissions = rawPermissions
+        .map((permission) => normalizeImportPermission(permission))
+        .filter((permission): permission is ProjectConfigPermission => Boolean(permission));
+    const roles = rawRoles
+        .map((role) => normalizeImportRole(role))
+        .filter((role): role is ProjectConfigRole => Boolean(role));
+
+    const skippedInvalidPermissions = rawPermissions.length - permissions.length;
+    const skippedInvalidRoles = rawRoles.length - roles.length;
+
+    const { data: existingPermissions, error: existingPermissionsError } = await supabase
+        .from("permissions")
+        .select("id, slug, is_system")
+        .eq("project_id", projectId);
+    if (existingPermissionsError) return { ok: false, error: "Failed to load existing permissions." };
+
+    const existingPermissionBySlug = new Map(
+        (existingPermissions ?? []).map((permission) => [permission.slug, permission])
+    );
+
+    let importedPermissions = 0;
+
+    for (const permission of permissions) {
+        const existing = existingPermissionBySlug.get(permission.slug);
+        if (!existing) {
+            const { data: created, error } = await supabase
+                .from("permissions")
+                .insert({
+                    project_id: projectId,
+                    slug: permission.slug,
+                    name: permission.name,
+                    description: permission.description,
+                    risk_level: permission.risk_level,
+                    enabled: permission.enabled,
+                    is_system: permission.is_system,
+                })
+                .select("id, slug, is_system")
+                .single();
+            if (error || !created) continue;
+            existingPermissionBySlug.set(created.slug, created);
+            importedPermissions += 1;
+            continue;
+        }
+
+        if (existing.is_system) continue;
+
+        const { error } = await supabase
+            .from("permissions")
+            .update({
+                name: permission.name,
+                description: permission.description,
+                risk_level: permission.risk_level,
+                enabled: permission.enabled,
+                is_system: permission.is_system,
+                updated_at: new Date().toISOString(),
+            })
+            .eq("id", existing.id)
+            .eq("project_id", projectId);
+        if (!error) importedPermissions += 1;
+    }
+
+    const { data: allPermissions, error: allPermissionsError } = await supabase
+        .from("permissions")
+        .select("id, slug")
+        .eq("project_id", projectId);
+    if (allPermissionsError) return { ok: false, error: "Failed to refresh permissions." };
+    const permissionIdBySlug = new Map((allPermissions ?? []).map((permission) => [permission.slug, permission.id]));
+
+    const { data: existingRoles, error: existingRolesError } = await supabase
+        .from("roles")
+        .select("id, slug, is_system")
+        .eq("project_id", projectId);
+    if (existingRolesError) return { ok: false, error: "Failed to load existing roles." };
+    const existingRoleBySlug = new Map((existingRoles ?? []).map((role) => [role.slug, role]));
+
+    let importedRoles = 0;
+    let assignmentUpdates = 0;
+
+    for (const role of roles) {
+        const permissionIds = role.permission_slugs
+            .map((slug) => permissionIdBySlug.get(slug))
+            .filter((id): id is string => Boolean(id));
+
+        const existing = existingRoleBySlug.get(role.slug);
+        if (!existing) {
+            const { data: createdRole, error: createRoleError } = await supabase
+                .from("roles")
+                .insert({
+                    project_id: projectId,
+                    slug: role.slug,
+                    name: role.name,
+                    description: role.description,
+                    is_system: role.is_system,
+                })
+                .select("id, slug, is_system")
+                .single();
+            if (createRoleError || !createdRole) continue;
+
+            if (permissionIds.length > 0) {
+                const inserts = permissionIds.map((permissionId) => ({
+                    role_id: createdRole.id,
+                    permission_id: permissionId,
+                }));
+                const { error: linkError } = await supabase.from("role_permissions").insert(inserts);
+                if (!linkError) assignmentUpdates += 1;
+            }
+            importedRoles += 1;
+            existingRoleBySlug.set(createdRole.slug, createdRole);
+            continue;
+        }
+
+        if (existing.is_system) continue;
+
+        const { error: updateRoleError } = await supabase
+            .from("roles")
+            .update({
+                name: role.name,
+                description: role.description,
+                is_system: role.is_system,
+                updated_at: new Date().toISOString(),
+            })
+            .eq("id", existing.id)
+            .eq("project_id", projectId);
+        if (!updateRoleError) importedRoles += 1;
+
+        const { error: deleteLinksError } = await supabase
+            .from("role_permissions")
+            .delete()
+            .eq("role_id", existing.id);
+        if (deleteLinksError) continue;
+
+        if (permissionIds.length > 0) {
+            const inserts = permissionIds.map((permissionId) => ({
+                role_id: existing.id,
+                permission_id: permissionId,
+            }));
+            const { error: insertLinksError } = await supabase.from("role_permissions").insert(inserts);
+            if (insertLinksError) continue;
+        }
+        assignmentUpdates += 1;
+    }
+
+    await logAuditEvent({
+        projectId,
+        userId: access.userId,
+        entityType: "project",
+        entityId: projectId,
+        action: "updated",
+        metadata: {
+            event: "project_config_imported",
+            imported_permissions: importedPermissions,
+            imported_roles: importedRoles,
+            assignment_updates: assignmentUpdates,
+            skipped_invalid_permissions: skippedInvalidPermissions,
+            skipped_invalid_roles: skippedInvalidRoles,
+        },
+    });
+
+    return {
+        ok: true,
+        data: {
+            importedPermissions,
+            importedRoles,
+            assignmentUpdates,
+            skippedInvalidPermissions,
+            skippedInvalidRoles,
+        },
+    };
 }

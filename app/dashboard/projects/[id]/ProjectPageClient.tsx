@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ApiKeysManager } from "./ApiKeysManager";
 import { BackButton } from "./BackButton";
@@ -378,6 +378,8 @@ import {
 import {
     archiveProjectAction,
     deleteProjectAction,
+    exportProjectConfigAction,
+    importProjectConfigAction,
     restoreProjectAction,
     updateProjectSettingsAction,
 } from "./project-settings-actions";
@@ -4093,9 +4095,12 @@ function ProjectSettingsManager({
     const [isSavingSettings, setIsSavingSettings] = useState(false);
     const [isArchiving, setIsArchiving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [isExportingConfig, setIsExportingConfig] = useState(false);
+    const [isImportingConfig, setIsImportingConfig] = useState(false);
     const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [deleteConfirmText, setDeleteConfirmText] = useState("");
+    const importInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
         setName(project.name);
@@ -4203,6 +4208,59 @@ function ProjectSettingsManager({
         }
     };
 
+    const handleExportConfig = async () => {
+        setIsExportingConfig(true);
+        try {
+            const result = await exportProjectConfigAction(project.id);
+            if (!result.ok) {
+                toast.error(result.error || "Failed to export configuration.");
+                return;
+            }
+            const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+            const filename = `${project.slug || "project"}-config-${stamp}.json`;
+            downloadBlob(JSON.stringify(result.data, null, 2), filename, "application/json");
+            toast.success("Configuration exported.");
+        } catch (error) {
+            toast.error(extractErrorMessage(error, "Failed to export configuration."));
+        } finally {
+            setIsExportingConfig(false);
+        }
+    };
+
+    const handleImportConfigFile = async (file: File | null) => {
+        if (!file) return;
+        setIsImportingConfig(true);
+        try {
+            const content = await file.text();
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(content);
+            } catch {
+                toast.error("Invalid JSON file.");
+                return;
+            }
+
+            const result = await importProjectConfigAction(project.id, parsed);
+            if (!result.ok) {
+                toast.error(result.error || "Failed to import configuration.");
+                return;
+            }
+
+            toast.success(
+                `Imported ${result.data.importedPermissions} permissions and ${result.data.importedRoles} roles.`
+            );
+            router.refresh();
+            window.location.reload();
+        } catch (error) {
+            toast.error(extractErrorMessage(error, "Failed to import configuration."));
+        } finally {
+            setIsImportingConfig(false);
+            if (importInputRef.current) {
+                importInputRef.current.value = "";
+            }
+        }
+    };
+
     return (
         <>
             <div className="space-y-5">
@@ -4285,6 +4343,44 @@ function ProjectSettingsManager({
                             {isSavingSettings ? "Saving..." : "Save settings"}
                         </button>
                     </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/8 bg-gradient-to-b from-[#121823] to-[#0f141d] p-6">
+                    <h3 className="text-base font-semibold text-white">Configuration import/export</h3>
+                    <p className="mt-1 text-sm text-white/55">
+                        Export roles, permissions and role-permission assignments as JSON, or import them from another environment.
+                    </p>
+                    <div className="mt-5 flex flex-wrap gap-3">
+                        <button
+                            type="button"
+                            onClick={handleExportConfig}
+                            disabled={isExportingConfig || isImportingConfig}
+                            className="btn btn-secondary"
+                        >
+                            {isExportingConfig ? "Exporting..." : "Export configuration JSON"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => importInputRef.current?.click()}
+                            disabled={isExportingConfig || isImportingConfig}
+                            className="btn btn-primary"
+                        >
+                            {isImportingConfig ? "Importing..." : "Import configuration JSON"}
+                        </button>
+                        <input
+                            ref={importInputRef}
+                            type="file"
+                            accept="application/json,.json"
+                            className="hidden"
+                            onChange={(event) => {
+                                const file = event.target.files?.[0] ?? null;
+                                void handleImportConfigFile(file);
+                            }}
+                        />
+                    </div>
+                    <p className="mt-3 text-xs text-white/45">
+                        Import updates existing items by slug and creates missing items. Role assignments are synced from the file.
+                    </p>
                 </div>
 
                 <div className="rounded-2xl border border-red-400/15 bg-[#16131a] p-6">
