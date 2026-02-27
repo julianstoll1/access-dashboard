@@ -38,6 +38,20 @@ export type ProjectConfigExport = {
 };
 
 export type ProjectConfigImportPreview = {
+    permissionChanges: Array<{
+        slug: string;
+        name: string;
+        action: "create" | "update" | "skip";
+        reason?: string;
+    }>;
+    roleChanges: Array<{
+        slug: string;
+        name: string;
+        action: "create" | "update" | "skip";
+        missingPermissionSlugs: string[];
+        permissionCount: number;
+        reason?: string;
+    }>;
     permissionSummary: {
         create: number;
         update: number;
@@ -485,6 +499,8 @@ export async function previewProjectConfigImportAction(
     let missingPermissionReferences = 0;
     const conflicts: string[] = [];
     const notes: string[] = [];
+    const permissionChanges: ProjectConfigImportPreview["permissionChanges"] = [];
+    const roleChanges: ProjectConfigImportPreview["roleChanges"] = [];
 
     const importedPermissionSlugs = new Set(parsed.permissions.map((permission) => permission.slug));
 
@@ -492,25 +508,46 @@ export async function previewProjectConfigImportAction(
         const existing = existingPermissionBySlug.get(permission.slug);
         if (!existing) {
             permissionCreate += 1;
+            permissionChanges.push({
+                slug: permission.slug,
+                name: permission.name,
+                action: "create",
+            });
             continue;
         }
         if (existing.is_system) {
             permissionSkip += 1;
+            permissionChanges.push({
+                slug: permission.slug,
+                name: permission.name,
+                action: "skip",
+                reason: "System permission",
+            });
             conflicts.push(`Permission "${permission.slug}" is a system permission and will be skipped.`);
             continue;
         }
         permissionUpdate += 1;
+        permissionChanges.push({
+            slug: permission.slug,
+            name: permission.name,
+            action: "update",
+        });
     }
 
     for (const role of parsed.roles) {
         const existing = existingRoleBySlug.get(role.slug);
+        let roleAction: "create" | "update" | "skip" = "create";
+        let roleReason: string | undefined;
         if (!existing) {
             roleCreate += 1;
         } else if (existing.is_system) {
             roleSkip += 1;
+            roleAction = "skip";
+            roleReason = "System role";
             conflicts.push(`Role "${role.slug}" is a system role and will be skipped.`);
         } else {
             roleUpdate += 1;
+            roleAction = "update";
         }
 
         const missingForRole = role.permission_slugs.filter((slug) => {
@@ -525,6 +562,14 @@ export async function previewProjectConfigImportAction(
                 }.`
             );
         }
+        roleChanges.push({
+            slug: role.slug,
+            name: role.name,
+            action: roleAction,
+            missingPermissionSlugs: missingForRole,
+            permissionCount: role.permission_slugs.length,
+            reason: roleReason,
+        });
         assignmentUpdate += 1;
     }
 
@@ -541,6 +586,8 @@ export async function previewProjectConfigImportAction(
     return {
         ok: true,
         data: {
+            permissionChanges,
+            roleChanges,
             permissionSummary: {
                 create: permissionCreate,
                 update: permissionUpdate,

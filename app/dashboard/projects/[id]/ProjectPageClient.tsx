@@ -1661,6 +1661,39 @@ function BulkAssignPermissionsModal({
     };
 
     const canSubmit = mode === "replace" || selectedPermissionIds.length > 0;
+    const permissionById = useMemo(
+        () => new Map(permissions.map((permission) => [permission.id, permission])),
+        [permissions]
+    );
+    const roleDiffPreview = useMemo(() => {
+        return roles.map((role) => {
+            const current = new Set(role.permission_ids);
+            let next = new Set(current);
+            if (mode === "replace") next = new Set(selectedPermissionIds);
+            if (mode === "add") {
+                for (const id of selectedPermissionIds) next.add(id);
+            }
+            if (mode === "remove") {
+                for (const id of selectedPermissionIds) next.delete(id);
+            }
+
+            const beforeNames = Array.from(current)
+                .map((id) => permissionById.get(id)?.name)
+                .filter(Boolean) as string[];
+            const afterNames = Array.from(next)
+                .map((id) => permissionById.get(id)?.name)
+                .filter(Boolean) as string[];
+
+            return {
+                roleId: role.id,
+                roleName: role.name,
+                beforeCount: current.size,
+                afterCount: next.size,
+                beforePreview: beforeNames.slice(0, 3).join(", "),
+                afterPreview: afterNames.slice(0, 3).join(", "),
+            };
+        });
+    }, [mode, permissionById, roles, selectedPermissionIds]);
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
@@ -1737,14 +1770,16 @@ function BulkAssignPermissionsModal({
 
                 <div className="mt-5 rounded-xl border border-white/10 bg-[#0b121c] p-3">
                     <p className="text-[11px] uppercase tracking-[0.12em] text-white/45">Affected roles</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                        {roles.map((role) => (
-                            <span
-                                key={role.id}
-                                className="inline-flex rounded-full border border-white/12 bg-white/[0.04] px-2 py-0.5 text-xs text-white/75"
-                            >
-                                {role.name}
-                            </span>
+                    <div className="mt-3 space-y-2">
+                        {roleDiffPreview.map((item) => (
+                            <div key={item.roleId} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/75">
+                                <div className="flex items-center justify-between gap-3">
+                                    <span className="font-medium text-white/88">{item.roleName}</span>
+                                    <span>{item.beforeCount} {"->"} {item.afterCount} permissions</span>
+                                </div>
+                                <p className="mt-1 text-white/45">Before: {item.beforePreview || "No permissions"}</p>
+                                <p className="mt-1 text-white/45">After: {item.afterPreview || "No permissions"}</p>
+                            </div>
                         ))}
                     </div>
                 </div>
@@ -1912,6 +1947,10 @@ function RoleEditorModal({
         () => [...selectedPermissionsValid].sort(),
         [selectedPermissionsValid]
     );
+    const permissionById = useMemo(
+        () => new Map(availablePermissions.map((permission) => [permission.id, permission])),
+        [availablePermissions]
+    );
     const isDirty = useMemo(
         () =>
             name !== (role?.name ?? "") ||
@@ -1921,6 +1960,45 @@ function RoleEditorModal({
             currentSelectedPermissions.join("|") !== initialSelectedPermissions.join("|"),
         [name, slug, description, isSystem, role, currentSelectedPermissions, initialSelectedPermissions]
     );
+    const roleMetadataDiff = useMemo(
+        () =>
+            [
+                name !== (role?.name ?? "")
+                    ? { label: "Name", before: role?.name ?? "Empty", after: name || "Empty" }
+                    : null,
+                slug !== (role?.slug ?? "")
+                    ? { label: "Slug", before: role?.slug ?? "Empty", after: slug || "Empty" }
+                    : null,
+                description !== (role?.description ?? "")
+                    ? {
+                        label: "Description",
+                        before: role?.description ?? "Empty",
+                        after: description || "Empty",
+                    }
+                    : null,
+                isSystem !== (role?.is_system ?? false)
+                    ? {
+                        label: "Type",
+                        before: role?.is_system ? "System" : "Custom",
+                        after: isSystem ? "System" : "Custom",
+                    }
+                    : null,
+            ].filter(Boolean) as Array<{ label: string; before: string; after: string }>,
+        [description, isSystem, name, role?.description, role?.is_system, role?.name, role?.slug, slug]
+    );
+    const permissionDiff = useMemo(() => {
+        const beforeSet = new Set(initialSelectedPermissions);
+        const afterSet = new Set(currentSelectedPermissions);
+
+        const added = currentSelectedPermissions
+            .filter((id) => !beforeSet.has(id))
+            .map((id) => permissionById.get(id)?.name ?? permissionById.get(id)?.slug ?? id);
+        const removed = initialSelectedPermissions
+            .filter((id) => !afterSet.has(id))
+            .map((id) => permissionById.get(id)?.name ?? permissionById.get(id)?.slug ?? id);
+
+        return { added, removed };
+    }, [currentSelectedPermissions, initialSelectedPermissions, permissionById]);
 
     useEffect(() => {
         onDirtyChange(isDirty);
@@ -2093,6 +2171,77 @@ function RoleEditorModal({
                             )}
                         </div>
                     </div>
+
+                    {mode === "edit" && isDirty && (
+                        <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <p className="text-xs uppercase tracking-[0.14em] text-white/45">
+                                        Change preview
+                                    </p>
+                                    <p className="mt-1 text-sm text-white/55">
+                                        Review what will change before saving this role.
+                                    </p>
+                                </div>
+                                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-white/60">
+                                    {roleMetadataDiff.length + permissionDiff.added.length + permissionDiff.removed.length} changes
+                                </span>
+                            </div>
+
+                            {roleMetadataDiff.length > 0 && (
+                                <div className="mt-4 space-y-2">
+                                    {roleMetadataDiff.map((item) => (
+                                        <div key={item.label} className="grid gap-2 rounded-lg border border-white/10 bg-white/[0.03] p-3 sm:grid-cols-[120px_1fr_1fr]">
+                                            <p className="text-[11px] uppercase tracking-[0.12em] text-white/45">{item.label}</p>
+                                            <div className="rounded-lg border border-white/10 bg-[#0f141d] px-3 py-2 text-xs text-white/65">
+                                                <p className="text-[10px] uppercase tracking-[0.12em] text-white/35">Before</p>
+                                                <p className="mt-1 break-words">{item.before}</p>
+                                            </div>
+                                            <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/8 px-3 py-2 text-xs text-emerald-100">
+                                                <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-200/75">After</p>
+                                                <p className="mt-1 break-words">{item.after}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                                    <p className="text-[11px] uppercase tracking-[0.12em] text-white/45">
+                                        Permissions added
+                                    </p>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                        {permissionDiff.added.length > 0 ? (
+                                            permissionDiff.added.map((item) => (
+                                                <span key={item} className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-100">
+                                                    + {item}
+                                                </span>
+                                            ))
+                                        ) : (
+                                            <span className="text-xs text-white/45">No permissions added</span>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                                    <p className="text-[11px] uppercase tracking-[0.12em] text-white/45">
+                                        Permissions removed
+                                    </p>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                        {permissionDiff.removed.length > 0 ? (
+                                            permissionDiff.removed.map((item) => (
+                                                <span key={item} className="rounded-full border border-red-400/20 bg-red-500/10 px-2.5 py-1 text-xs text-red-100">
+                                                    - {item}
+                                                </span>
+                                            ))
+                                        ) : (
+                                            <span className="text-xs text-white/45">No permissions removed</span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     <div className="flex justify-end gap-3 border-t border-white/10 pt-5">
                         <button type="button" onClick={requestClose} disabled={isSaving} className="btn btn-secondary">
@@ -4856,12 +5005,146 @@ function ConfigImportPreviewModal({
                     </div>
                 </div>
 
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Permission changes</p>
+                        <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
+                            {preview.permissionChanges.length > 0 ? (
+                                preview.permissionChanges.map((item, index) => (
+                                    <div key={`${item.slug}-${index}`} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/75">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <span className="block truncate font-medium text-white/88">{item.name}</span>
+                                                <p className="mt-1 truncate font-mono text-white/50">{item.slug}</p>
+                                            </div>
+                                            <ChangeActionBadge action={item.action} />
+                                        </div>
+                                        {item.reason && <p className="mt-2 text-white/45">{item.reason}</p>}
+                                    </div>
+                                ))
+                            ) : (
+                                <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3 text-xs text-white/45">
+                                    No permission changes in this import.
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Role changes</p>
+                        <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
+                            {preview.roleChanges.length > 0 ? (
+                                preview.roleChanges.map((item, index) => (
+                                    <div key={`${item.slug}-${index}`} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/75">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <span className="block truncate font-medium text-white/88">{item.name}</span>
+                                                <p className="mt-1 truncate font-mono text-white/50">{item.slug}</p>
+                                            </div>
+                                            <ChangeActionBadge action={item.action} />
+                                        </div>
+                                        <div className="mt-2 flex items-center justify-between gap-3 text-white/45">
+                                            <span>{item.permissionCount} permissions in file</span>
+                                            {item.missingPermissionSlugs.length > 0 && (
+                                                <span className="text-amber-100/80">
+                                                    {item.missingPermissionSlugs.length} missing references
+                                                </span>
+                                            )}
+                                        </div>
+                                        {item.missingPermissionSlugs.length > 0 && (
+                                            <p className="mt-2 text-amber-100/80">
+                                                Missing refs: {item.missingPermissionSlugs.slice(0, 4).join(", ")}
+                                                {item.missingPermissionSlugs.length > 4 ? "..." : ""}
+                                            </p>
+                                        )}
+                                        {item.reason && <p className="mt-2 text-white/45">{item.reason}</p>}
+                                    </div>
+                                ))
+                            ) : (
+                                <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3 text-xs text-white/45">
+                                    No role changes in this import.
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
                 <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
                     <button type="button" onClick={onCancel} disabled={isImporting} className="btn btn-secondary">
                         Cancel
                     </button>
                     <button type="button" onClick={onConfirm} disabled={isImporting} className="btn btn-primary">
                         {isImporting ? "Importing..." : "Confirm import"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ChangeActionBadge({
+    action,
+}: {
+    action: "create" | "update" | "skip";
+}) {
+    const style =
+        action === "create"
+            ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
+            : action === "update"
+                ? "border-blue-400/20 bg-blue-500/10 text-blue-200"
+                : "border-white/10 bg-white/[0.04] text-white/60";
+
+    return (
+        <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.14em] ${style}`}>
+            {action}
+        </span>
+    );
+}
+
+function DiffConfirmModal({
+    title,
+    summary,
+    items,
+    onCancel,
+    onConfirm,
+    isBusy,
+    confirmLabel,
+}: {
+    title: string;
+    summary: string;
+    items: Array<{ label: string; before: string; after: string }>;
+    onCancel: () => void;
+    onConfirm: () => void;
+    isBusy: boolean;
+    confirmLabel: string;
+}) {
+    return (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
+                <h3 className="text-xl font-semibold text-white">{title}</h3>
+                <p className="mt-2 text-sm text-white/55">{summary}</p>
+                <div className="mt-5 space-y-3">
+                    {items.map((item) => (
+                        <div key={item.label} className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                            <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">{item.label}</p>
+                            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                                    <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Before</p>
+                                    <p className="mt-1 text-sm text-white/75">{item.before}</p>
+                                </div>
+                                <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/8 px-3 py-2">
+                                    <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-200/75">After</p>
+                                    <p className="mt-1 text-sm text-emerald-100">{item.after}</p>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+                <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
+                    <button type="button" onClick={onCancel} disabled={isBusy} className="btn btn-secondary">
+                        Cancel
+                    </button>
+                    <button type="button" onClick={onConfirm} disabled={isBusy} className="btn btn-primary">
+                        {confirmLabel}
                     </button>
                 </div>
             </div>
@@ -4926,6 +5209,7 @@ function ProjectSettingsManager({
     const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showImportPreview, setShowImportPreview] = useState(false);
+    const [showSettingsDiffPreview, setShowSettingsDiffPreview] = useState(false);
     const [deleteConfirmText, setDeleteConfirmText] = useState("");
     const importInputRef = useRef<HTMLInputElement | null>(null);
     const [pendingImportConfig, setPendingImportConfig] = useState<ProjectConfigExport | null>(null);
@@ -4966,6 +5250,21 @@ function ProjectSettingsManager({
     }, [name, slug]);
 
     const canSaveMetadata = !localErrors.name && !localErrors.slug && metadataDirty;
+    const settingsDiff = useMemo(
+        () =>
+            [
+                name !== project.name
+                    ? { label: "Project name", before: project.name, after: name }
+                    : null,
+                slug !== project.slug
+                    ? { label: "Slug", before: project.slug, after: slug }
+                    : null,
+                description !== (project.description ?? "")
+                    ? { label: "Description", before: project.description ?? "Empty", after: description || "Empty" }
+                    : null,
+            ].filter(Boolean) as Array<{ label: string; before: string; after: string }>,
+        [description, name, project.description, project.name, project.slug, slug]
+    );
     const handleNameChange = (value: string) => {
         setName(value);
         if (!slugTouched) {
@@ -5187,7 +5486,7 @@ function ProjectSettingsManager({
                     <div className="mt-5 flex justify-end border-t border-white/10 pt-4">
                         <button
                             type="button"
-                            onClick={handleSaveMetadata}
+                            onClick={() => setShowSettingsDiffPreview(true)}
                             disabled={!canSaveMetadata || isSavingSettings}
                             className="btn btn-primary min-w-[150px]"
                         >
@@ -5273,6 +5572,21 @@ function ProjectSettingsManager({
                     onCancel={() => setShowArchiveConfirm(false)}
                     onConfirm={handleArchiveToggle}
                     isBusy={isArchiving}
+                />
+            )}
+
+            {showSettingsDiffPreview && (
+                <DiffConfirmModal
+                    title="Review project changes"
+                    summary="These project settings will be updated."
+                    items={settingsDiff}
+                    onCancel={() => setShowSettingsDiffPreview(false)}
+                    onConfirm={async () => {
+                        setShowSettingsDiffPreview(false);
+                        await handleSaveMetadata();
+                    }}
+                    isBusy={isSavingSettings}
+                    confirmLabel={isSavingSettings ? "Saving..." : "Confirm changes"}
                 />
             )}
 
