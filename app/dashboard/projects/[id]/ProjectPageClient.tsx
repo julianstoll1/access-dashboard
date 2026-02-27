@@ -444,6 +444,9 @@ import {
     deleteProjectAction,
     exportProjectConfigAction,
     importProjectConfigAction,
+    previewProjectConfigImportAction,
+    type ProjectConfigExport,
+    type ProjectConfigImportPreview,
     restoreProjectAction,
     updateProjectSettingsAction,
 } from "./project-settings-actions";
@@ -4779,6 +4782,125 @@ function IntegrationSnippetCard({
     );
 }
 
+function ConfigImportPreviewModal({
+    preview,
+    onCancel,
+    onConfirm,
+    isImporting,
+}: {
+    preview: ProjectConfigImportPreview;
+    onCancel: () => void;
+    onConfirm: () => void;
+    isImporting: boolean;
+}) {
+    const hasConflicts = preview.conflicts.length > 0;
+
+    return (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-3xl rounded-2xl border border-white/10 bg-[#0f141d] p-7 shadow-2xl">
+                <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-5">
+                    <div>
+                        <h3 className="text-xl font-semibold text-white">Review configuration import</h3>
+                        <p className="mt-1 text-sm text-white/50">
+                            Check what will be created, updated or skipped before importing.
+                        </p>
+                    </div>
+                    <button onClick={onCancel} disabled={isImporting} className="btn btn-secondary text-xs px-3 py-1.5">
+                        Close
+                    </button>
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                    <PreviewStatCard label="Permissions" create={preview.permissionSummary.create} update={preview.permissionSummary.update} skip={preview.permissionSummary.skip} />
+                    <PreviewStatCard label="Roles" create={preview.roleSummary.create} update={preview.roleSummary.update} skip={preview.roleSummary.skip} />
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Assignments</p>
+                        <div className="mt-3 space-y-2 text-sm text-white/80">
+                            <p>{preview.assignmentSummary.update} role assignment set{preview.assignmentSummary.update === 1 ? "" : "s"} will sync</p>
+                            <p>{preview.assignmentSummary.missingPermissionReferences} missing permission reference{preview.assignmentSummary.missingPermissionReferences === 1 ? "" : "s"}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Potential conflicts</p>
+                        {hasConflicts ? (
+                            <div className="mt-3 max-h-48 space-y-2 overflow-y-auto text-sm text-white/72">
+                                {preview.conflicts.map((conflict, index) => (
+                                    <div key={`${conflict}-${index}`} className="rounded-lg border border-amber-400/15 bg-amber-500/8 px-3 py-2 text-amber-100/85">
+                                        {conflict}
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="mt-3 text-sm text-white/55">No direct conflicts detected.</p>
+                        )}
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Import notes</p>
+                        <div className="mt-3 space-y-2 text-sm text-white/72">
+                            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                                {preview.skippedInvalidPermissions} invalid permission entr{preview.skippedInvalidPermissions === 1 ? "y" : "ies"} will be ignored.
+                            </div>
+                            <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                                {preview.skippedInvalidRoles} invalid role entr{preview.skippedInvalidRoles === 1 ? "y" : "ies"} will be ignored.
+                            </div>
+                            {preview.notes.map((note, index) => (
+                                <div key={`${note}-${index}`} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                                    {note}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-6 flex justify-end gap-3 border-t border-white/10 pt-5">
+                    <button type="button" onClick={onCancel} disabled={isImporting} className="btn btn-secondary">
+                        Cancel
+                    </button>
+                    <button type="button" onClick={onConfirm} disabled={isImporting} className="btn btn-primary">
+                        {isImporting ? "Importing..." : "Confirm import"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function PreviewStatCard({
+    label,
+    create,
+    update,
+    skip,
+}: {
+    label: string;
+    create: number;
+    update: number;
+    skip: number;
+}) {
+    return (
+        <div className="rounded-xl border border-white/10 bg-[#0a0f16] p-4">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">{label}</p>
+            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/8 px-2 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-200/80">Create</p>
+                    <p className="mt-1 text-sm font-semibold text-emerald-100">{create}</p>
+                </div>
+                <div className="rounded-lg border border-blue-400/15 bg-blue-500/8 px-2 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-blue-200/80">Update</p>
+                    <p className="mt-1 text-sm font-semibold text-blue-100">{update}</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/[0.03] px-2 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-white/50">Skip</p>
+                    <p className="mt-1 text-sm font-semibold text-white/85">{skip}</p>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function ProjectSettingsManager({
     project,
     onProjectChange,
@@ -4800,10 +4922,14 @@ function ProjectSettingsManager({
     const [isDeleting, setIsDeleting] = useState(false);
     const [isExportingConfig, setIsExportingConfig] = useState(false);
     const [isImportingConfig, setIsImportingConfig] = useState(false);
+    const [isPreviewingConfig, setIsPreviewingConfig] = useState(false);
     const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [showImportPreview, setShowImportPreview] = useState(false);
     const [deleteConfirmText, setDeleteConfirmText] = useState("");
     const importInputRef = useRef<HTMLInputElement | null>(null);
+    const [pendingImportConfig, setPendingImportConfig] = useState<ProjectConfigExport | null>(null);
+    const [importPreview, setImportPreview] = useState<ProjectConfigImportPreview | null>(null);
 
     useEffect(() => {
         setName(project.name);
@@ -4932,7 +5058,7 @@ function ProjectSettingsManager({
 
     const handleImportConfigFile = async (file: File | null) => {
         if (!file) return;
-        setIsImportingConfig(true);
+        setIsPreviewingConfig(true);
         try {
             const content = await file.text();
             let parsed: unknown;
@@ -4943,7 +5069,29 @@ function ProjectSettingsManager({
                 return;
             }
 
-            const result = await importProjectConfigAction(project.id, parsed);
+            const result = await previewProjectConfigImportAction(project.id, parsed);
+            if (!result.ok) {
+                toast.error(result.error || "Failed to preview configuration import.");
+                return;
+            }
+            setPendingImportConfig(parsed as ProjectConfigExport);
+            setImportPreview(result.data);
+            setShowImportPreview(true);
+        } catch (error) {
+            toast.error(extractErrorMessage(error, "Failed to preview configuration import."));
+        } finally {
+            setIsPreviewingConfig(false);
+            if (importInputRef.current) {
+                importInputRef.current.value = "";
+            }
+        }
+    };
+
+    const handleConfirmImportConfig = async () => {
+        if (!pendingImportConfig || !importPreview) return;
+        setIsImportingConfig(true);
+        try {
+            const result = await importProjectConfigAction(project.id, pendingImportConfig);
             if (!result.ok) {
                 toast.error(result.error || "Failed to import configuration.");
                 return;
@@ -4952,15 +5100,15 @@ function ProjectSettingsManager({
             toast.success(
                 `Imported ${result.data.importedPermissions} permissions and ${result.data.importedRoles} roles.`
             );
+            setShowImportPreview(false);
+            setPendingImportConfig(null);
+            setImportPreview(null);
             router.refresh();
             window.location.reload();
         } catch (error) {
             toast.error(extractErrorMessage(error, "Failed to import configuration."));
         } finally {
             setIsImportingConfig(false);
-            if (importInputRef.current) {
-                importInputRef.current.value = "";
-            }
         }
     };
 
@@ -5065,10 +5213,10 @@ function ProjectSettingsManager({
                         <button
                             type="button"
                             onClick={() => importInputRef.current?.click()}
-                            disabled={isExportingConfig || isImportingConfig}
+                            disabled={isExportingConfig || isImportingConfig || isPreviewingConfig}
                             className="btn btn-primary"
                         >
-                            {isImportingConfig ? "Importing..." : "Import configuration JSON"}
+                            {isPreviewingConfig ? "Reviewing..." : isImportingConfig ? "Importing..." : "Import configuration JSON"}
                         </button>
                         <input
                             ref={importInputRef}
@@ -5125,6 +5273,20 @@ function ProjectSettingsManager({
                     onCancel={() => setShowArchiveConfirm(false)}
                     onConfirm={handleArchiveToggle}
                     isBusy={isArchiving}
+                />
+            )}
+
+            {showImportPreview && importPreview && (
+                <ConfigImportPreviewModal
+                    preview={importPreview}
+                    onCancel={() => {
+                        if (isImportingConfig) return;
+                        setShowImportPreview(false);
+                        setPendingImportConfig(null);
+                        setImportPreview(null);
+                    }}
+                    onConfirm={handleConfirmImportConfig}
+                    isImporting={isImportingConfig}
                 />
             )}
 

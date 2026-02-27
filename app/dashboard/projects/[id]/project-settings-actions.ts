@@ -37,6 +37,27 @@ export type ProjectConfigExport = {
     roles: ProjectConfigRole[];
 };
 
+export type ProjectConfigImportPreview = {
+    permissionSummary: {
+        create: number;
+        update: number;
+        skip: number;
+    };
+    roleSummary: {
+        create: number;
+        update: number;
+        skip: number;
+    };
+    assignmentSummary: {
+        update: number;
+        missingPermissionReferences: number;
+    };
+    skippedInvalidPermissions: number;
+    skippedInvalidRoles: number;
+    conflicts: string[];
+    notes: string[];
+};
+
 const SLUG_REGEX = /^[a-z0-9.]+$/;
 const MAX_NAME_LENGTH = 120;
 const MAX_DESCRIPTION_LENGTH = 1000;
@@ -397,6 +418,151 @@ function normalizeImportRole(raw: ProjectConfigRole): ProjectConfigRole | null {
     };
 }
 
+function parseConfigPayload(input: unknown) {
+    if (!input || typeof input !== "object") {
+        return { ok: false, error: "Invalid config file format." } as const;
+    }
+    const payload = input as Partial<ProjectConfigExport>;
+
+    if (payload.version !== 1) {
+        return { ok: false, error: "Invalid config file format." } as const;
+    }
+
+    const rawPermissions = Array.isArray(payload.permissions) ? payload.permissions : [];
+    const rawRoles = Array.isArray(payload.roles) ? payload.roles : [];
+
+    const permissions = rawPermissions
+        .map((permission) => normalizeImportPermission(permission))
+        .filter((permission): permission is ProjectConfigPermission => Boolean(permission));
+    const roles = rawRoles
+        .map((role) => normalizeImportRole(role))
+        .filter((role): role is ProjectConfigRole => Boolean(role));
+
+    return {
+        ok: true,
+        permissions,
+        roles,
+        skippedInvalidPermissions: rawPermissions.length - permissions.length,
+        skippedInvalidRoles: rawRoles.length - roles.length,
+    } as const;
+}
+
+export async function previewProjectConfigImportAction(
+    projectId: string,
+    input: unknown
+): Promise<ActionResult<ProjectConfigImportPreview>> {
+    const supabase = await createSupabaseServerClient();
+    const access = await ensureProjectAccess(supabase, projectId);
+    if (!access.ok) return { ok: false, error: access.error };
+
+    const parsed = parseConfigPayload(input);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+
+    const { data: existingPermissions, error: existingPermissionsError } = await supabase
+        .from("permissions")
+        .select("slug, is_system")
+        .eq("project_id", projectId);
+    if (existingPermissionsError) return { ok: false, error: "Failed to inspect existing permissions." };
+
+    const { data: existingRoles, error: existingRolesError } = await supabase
+        .from("roles")
+        .select("slug, is_system")
+        .eq("project_id", projectId);
+    if (existingRolesError) return { ok: false, error: "Failed to inspect existing roles." };
+
+    const existingPermissionBySlug = new Map(
+        (existingPermissions ?? []).map((permission) => [permission.slug, permission])
+    );
+    const existingRoleBySlug = new Map((existingRoles ?? []).map((role) => [role.slug, role]));
+
+    let permissionCreate = 0;
+    let permissionUpdate = 0;
+    let permissionSkip = 0;
+    let roleCreate = 0;
+    let roleUpdate = 0;
+    let roleSkip = 0;
+    let assignmentUpdate = 0;
+    let missingPermissionReferences = 0;
+    const conflicts: string[] = [];
+    const notes: string[] = [];
+
+    const importedPermissionSlugs = new Set(parsed.permissions.map((permission) => permission.slug));
+
+    for (const permission of parsed.permissions) {
+        const existing = existingPermissionBySlug.get(permission.slug);
+        if (!existing) {
+            permissionCreate += 1;
+            continue;
+        }
+        if (existing.is_system) {
+            permissionSkip += 1;
+            conflicts.push(`Permission "${permission.slug}" is a system permission and will be skipped.`);
+            continue;
+        }
+        permissionUpdate += 1;
+    }
+
+    for (const role of parsed.roles) {
+        const existing = existingRoleBySlug.get(role.slug);
+        if (!existing) {
+            roleCreate += 1;
+        } else if (existing.is_system) {
+            roleSkip += 1;
+            conflicts.push(`Role "${role.slug}" is a system role and will be skipped.`);
+        } else {
+            roleUpdate += 1;
+        }
+
+        const missingForRole = role.permission_slugs.filter((slug) => {
+            if (importedPermissionSlugs.has(slug)) return false;
+            return !existingPermissionBySlug.has(slug);
+        });
+        if (missingForRole.length > 0) {
+            missingPermissionReferences += missingForRole.length;
+            conflicts.push(
+                `Role "${role.slug}" references missing permissions: ${missingForRole.slice(0, 4).join(", ")}${
+                    missingForRole.length > 4 ? "..." : ""
+                }.`
+            );
+        }
+        assignmentUpdate += 1;
+    }
+
+    if (parsed.skippedInvalidPermissions > 0) {
+        notes.push(`${parsed.skippedInvalidPermissions} invalid permission entries will be ignored.`);
+    }
+    if (parsed.skippedInvalidRoles > 0) {
+        notes.push(`${parsed.skippedInvalidRoles} invalid role entries will be ignored.`);
+    }
+    if (assignmentUpdate === 0) {
+        notes.push("No role assignments found in this file.");
+    }
+
+    return {
+        ok: true,
+        data: {
+            permissionSummary: {
+                create: permissionCreate,
+                update: permissionUpdate,
+                skip: permissionSkip,
+            },
+            roleSummary: {
+                create: roleCreate,
+                update: roleUpdate,
+                skip: roleSkip,
+            },
+            assignmentSummary: {
+                update: assignmentUpdate,
+                missingPermissionReferences,
+            },
+            skippedInvalidPermissions: parsed.skippedInvalidPermissions,
+            skippedInvalidRoles: parsed.skippedInvalidRoles,
+            conflicts,
+            notes,
+        },
+    };
+}
+
 export async function exportProjectConfigAction(
     projectId: string
 ): Promise<ActionResult<ProjectConfigExport>> {
@@ -501,27 +667,9 @@ export async function importProjectConfigAction(
     const access = await ensureProjectAccess(supabase, projectId);
     if (!access.ok) return { ok: false, error: access.error };
 
-    if (!input || typeof input !== "object") {
-        return { ok: false, error: "Invalid config file format." };
-    }
-    const payload = input as Partial<ProjectConfigExport>;
-
-    if (payload.version !== 1) {
-        return { ok: false, error: "Invalid config file format." };
-    }
-
-    const rawPermissions = Array.isArray(payload.permissions) ? payload.permissions : [];
-    const rawRoles = Array.isArray(payload.roles) ? payload.roles : [];
-
-    const permissions = rawPermissions
-        .map((permission) => normalizeImportPermission(permission))
-        .filter((permission): permission is ProjectConfigPermission => Boolean(permission));
-    const roles = rawRoles
-        .map((role) => normalizeImportRole(role))
-        .filter((role): role is ProjectConfigRole => Boolean(role));
-
-    const skippedInvalidPermissions = rawPermissions.length - permissions.length;
-    const skippedInvalidRoles = rawRoles.length - roles.length;
+    const parsed = parseConfigPayload(input);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    const { permissions, roles, skippedInvalidPermissions, skippedInvalidRoles } = parsed;
 
     const { data: existingPermissions, error: existingPermissionsError } = await supabase
         .from("permissions")
