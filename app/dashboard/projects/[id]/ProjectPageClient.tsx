@@ -325,8 +325,7 @@ export default function ProjectPageClient({
 
                                 <div className="rounded-2xl border border-white/8 bg-[#111722] p-5">
                                     <p className="text-[11px] uppercase tracking-[0.14em] text-white/45">Operational Metrics</p>
-                                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                                        <OverviewStatRow label="Access grants" value={projectKpis.total_access_grants.toString()} />
+                                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                                         <OverviewStatRow label="API keys" value={projectKpis.total_api_keys.toString()} />
                                         <OverviewStatRow label="Usage count" value={formattedUsage} />
                                         <OverviewStatRow label="Last activity" value={lastActivityDisplay} />
